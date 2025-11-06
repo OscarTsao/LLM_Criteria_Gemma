@@ -22,6 +22,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 
 import sys
+import os
 sys.path.append(str(Path(__file__).parent.parent))
 
 from models.gemma_encoder import GemmaClassifier
@@ -148,37 +149,82 @@ def main():
     parser = argparse.ArgumentParser(description='Evaluate Gemma Encoder on ReDSM5')
     parser.add_argument('--checkpoint', type=str, required=True, help='Path to model checkpoint')
     parser.add_argument('--data_dir', type=str,
-                        default='/media/cvrlab308/cvrlab308_4090/YuNing/LLM_Criteria_Gemma/data/redsm5',
-                        help='Path to dataset directory')
+                        default=None,
+                        help='Path to dataset directory (defaults to data/redsm5 relative to project root)')
     parser.add_argument('--batch_size', type=int, default=16, help='Batch size for evaluation')
     parser.add_argument('--output_dir', type=str, default='./eval_results', help='Output directory')
     parser.add_argument('--split', type=str, default='test', choices=['train', 'val', 'test'],
                         help='Dataset split to evaluate')
     args = parser.parse_args()
 
+    # Set default data_dir if not provided
+    if args.data_dir is None:
+        # Use relative path from project root
+        project_root = Path(__file__).parent.parent.parent
+        args.data_dir = str(project_root / 'data' / 'redsm5')
+
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    print("Loading model...")
+    print("Loading checkpoint...")
     # Load checkpoint
     checkpoint = torch.load(args.checkpoint, map_location='cpu')
 
-    # Initialize model
+    # Extract model configuration from checkpoint
+    if 'config' in checkpoint:
+        cfg = checkpoint['config']
+        model_config = cfg.get('model', {})
+        data_config = cfg.get('data', {})
+
+        model_name = model_config.get('name', 'google/gemma-2-2b')
+        pooling_strategy = model_config.get('pooling_strategy', 'mean')
+        freeze_encoder = model_config.get('freeze_encoder', False)
+        hidden_dropout_prob = model_config.get('hidden_dropout_prob', 0.1)
+        classifier_hidden_size = model_config.get('classifier_hidden_size', None)
+        use_gradient_checkpointing = model_config.get('use_gradient_checkpointing', False)
+        max_length = data_config.get('max_length', 512)
+
+        print(f"Loaded config from checkpoint:")
+        print(f"  Model: {model_name}")
+        print(f"  Pooling: {pooling_strategy}")
+    else:
+        print("Warning: No config found in checkpoint, using default values")
+        model_name = 'google/gemma-2-2b'
+        pooling_strategy = 'mean'
+        freeze_encoder = False
+        hidden_dropout_prob = 0.1
+        classifier_hidden_size = None
+        use_gradient_checkpointing = False
+        max_length = 512
+
+    # Initialize device
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    print(f"Using device: {device}")
+
+    # Initialize model with config from checkpoint
+    print("Initializing model...")
     model = GemmaClassifier(
         num_classes=NUM_CLASSES,
-        model_name='google/gemma-2-2b',  # Adjust if needed
-        pooling_strategy='mean'
+        model_name=model_name,
+        pooling_strategy=pooling_strategy,
+        freeze_encoder=freeze_encoder,
+        hidden_dropout_prob=hidden_dropout_prob,
+        classifier_hidden_size=classifier_hidden_size,
+        device=device,
+        use_gradient_checkpointing=use_gradient_checkpointing,
     )
+
+    # Load model weights
     model.load_state_dict(checkpoint['model_state_dict'])
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
     model = model.to(device)
+    print("Model loaded successfully")
 
     print("Loading dataset...")
-    tokenizer = AutoTokenizer.from_pretrained('google/gemma-2-2b')
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
     train_dataset, val_dataset, test_dataset = load_redsm5(
         data_dir=args.data_dir,
         tokenizer=tokenizer,
-        max_length=512
+        max_length=max_length
     )
 
     # Select dataset split

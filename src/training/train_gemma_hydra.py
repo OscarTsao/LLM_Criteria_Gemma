@@ -17,6 +17,7 @@ from torch.cuda.amp import autocast, GradScaler
 from transformers import AutoTokenizer, get_linear_schedule_with_warmup
 from sklearn.metrics import accuracy_score, precision_recall_fscore_support
 import numpy as np
+import pandas as pd
 from pathlib import Path
 import json
 from datetime import datetime
@@ -392,5 +393,4 @@ def main(cfg: DictConfig):
 
 
 if __name__ == '__main__':
-    import pandas as pd
     main()

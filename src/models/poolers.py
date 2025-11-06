@@ -11,6 +11,16 @@ class BasePooler(ABC):
 
     @abstractmethod
     def __call__(self, hidden_states: torch.Tensor, attention_mask: Optional[torch.Tensor] = None) -> torch.Tensor:
+        """
+        Apply pooling to hidden states.
+
+        Args:
+            hidden_states: Tensor of shape [batch_size, seq_length, hidden_dim]
+            attention_mask: Optional mask of shape [batch_size, seq_length]
+
+        Returns:
+            Pooled tensor of shape [batch_size, hidden_dim]
+        """
         pass
 
 
@@ -33,12 +43,23 @@ class LastKPooler(BasePooler):
 
 
 class MeanPooler(BasePooler):
-    """Average pooling over valid tokens."""
+    """
+    Average pooling over valid tokens.
+
+    Recommended strategy for most tasks. Computes mean of all non-padding tokens.
+    """
     def __call__(self, hidden_states: torch.Tensor, attention_mask: Optional[torch.Tensor] = None) -> torch.Tensor:
+        """Average pool hidden states, respecting attention mask."""
         if attention_mask is None:
             return hidden_states.mean(dim=1)
-        mask_expanded = attention_mask.unsqueeze(-1).expand(hidden_states.shape)
+
+        # Expand mask to match hidden_states dimensions
+        mask_expanded = attention_mask.unsqueeze(-1).expand(hidden_states.shape).float()
+
+        # Sum hidden states for valid tokens
         sum_hidden = (hidden_states * mask_expanded).sum(dim=1)
+
+        # Count valid tokens and normalize
         sum_mask = mask_expanded.sum(dim=1)
         return sum_hidden / sum_mask.clamp(min=1e-9)
 
@@ -55,9 +76,9 @@ class MaxPooler(BasePooler):
         if attention_mask is None:
             return hidden_states.max(dim=1)[0]
         mask_expanded = attention_mask.unsqueeze(-1).expand(hidden_states.shape)
-        hidden_states = hidden_states.clone()
-        hidden_states[~mask_expanded.bool()] = float('-inf')
-        return hidden_states.max(dim=1)[0]
+        # Use masked_fill instead of clone for memory efficiency
+        masked_hidden = hidden_states.masked_fill(~mask_expanded.bool(), float('-inf'))
+        return masked_hidden.max(dim=1)[0]
 
 
 class AttentionPooler(nn.Module):

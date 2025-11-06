@@ -1,0 +1,56 @@
+# Hydra configuration for Gemma Encoder training
+# Override with: python src/training/train_gemma_hydra.py model.name=google/gemma-2-9b
+
+defaults:
+  - _self_
+  - experiment: null
+
+# Model configuration
+model:
+  name: klyang/MentaLLaMA-chat-7B
+  pooling_strategy: mean  # Options: mean, cls, max, first_k, last_k, attention
+  freeze_encoder: true  # Freeze 7B encoder, only train classifier head
+  hidden_dropout_prob: 0.1
+  classifier_hidden_size: null  # null = simple linear, or specify size like 768
+  use_gradient_checkpointing: true  # Enable to reduce memory usage (trades compute for memory)
+
+# Training configuration
+training:
+  num_epochs: 10
+  batch_size: 4  # Increased since encoder is frozen (no gradients for 7B params)
+  learning_rate: 2e-5
+  weight_decay: 0.01
+  warmup_ratio: 0.1
+  max_grad_norm: 1.0
+  use_class_weights: true
+
+# Data configuration
+data:
+  data_dir: /media/cvrlab308/cvrlab308_4090/YuNing/LLM_Criteria_Gemma/data/redsm5
+  max_length: 512
+  num_folds: 5
+  random_seed: 42
+
+# Cross-validation configuration
+cv:
+  enabled: true
+  num_folds: 5
+  stratified: true
+  save_fold_results: true
+
+# Output configuration
+output:
+  base_dir: outputs
+  experiment_name: gemma_5fold
+  save_best_only: true
+  save_predictions: true
+
+# Logging
+logging:
+  log_interval: 10  # steps
+  eval_interval: 1  # epochs
+
+# Device configuration
+device:
+  use_cuda: true
+  mixed_precision: true  # Use bfloat16

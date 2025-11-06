@@ -1,0 +1,14 @@
+# @package _global_
+# Full 5-fold cross-validation experiment
+
+training:
+  num_epochs: 10
+  batch_size: 16
+  learning_rate: 2e-5
+
+cv:
+  num_folds: 5
+  stratified: true
+
+output:
+  experiment_name: full_5fold_gemma2b

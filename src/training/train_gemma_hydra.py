@@ -8,6 +8,7 @@ Usage:
 """
 
 import hydra
+from hydra.utils import to_absolute_path
 from omegaconf import DictConfig, OmegaConf
 import torch
 import torch.nn as nn
@@ -18,6 +19,7 @@ from sklearn.metrics import accuracy_score, precision_recall_fscore_support
 import numpy as np
 from pathlib import Path
 import json
+from datetime import datetime
 from tqdm.auto import tqdm
 import sys
 
@@ -32,18 +34,23 @@ from data.cv_splits import create_cv_splits, load_fold_split, get_fold_statistic
 class FoldTrainer:
     """Trainer for a single fold."""
 
-    def __init__(self, cfg: DictConfig, fold_idx: int, device: str = 'cuda'):
+    def __init__(self, cfg: DictConfig, fold_idx: int, run_dir: Path, device: str = 'cuda'):
         self.cfg = cfg
         self.fold_idx = fold_idx
         self.device = device
-        self.best_val_f1 = 0.0
+        self.run_dir = run_dir
+        self.best_val_f1 = float('-inf')
+        self.best_epoch = -1
+        self.epochs_without_improvement = 0
+        self.patience = cfg.training.get('early_stopping_patience')
+        self.min_delta = float(cfg.training.get('early_stopping_min_delta', 0.0))
 
         # Initialize AMP scaler for mixed precision training
         self.use_amp = cfg.device.mixed_precision
         self.scaler = GradScaler() if self.use_amp else None
 
         # Output directory for this fold
-        self.fold_dir = Path(cfg.output.base_dir) / cfg.output.experiment_name / f'fold_{fold_idx}'
+        self.fold_dir = run_dir / f'fold_{fold_idx}'
         self.fold_dir.mkdir(parents=True, exist_ok=True)
 
     def train_epoch(self, model, dataloader, optimizer, scheduler, criterion):
@@ -162,6 +169,9 @@ class FoldTrainer:
             'val_loss': [],
             'val_accuracy': [],
             'val_f1': [],
+            'best_epoch': None,
+            'best_val_f1': None,
+            'epochs_trained': 0,
         }
 
         print(f"\n{'='*60}")
@@ -186,8 +196,13 @@ class FoldTrainer:
             print(f"Val F1: {val_metrics['f1']:.4f}")
 
             # Save best model
-            if val_metrics['f1'] > self.best_val_f1:
+            improved = val_metrics['f1'] > (self.best_val_f1 + self.min_delta)
+            if improved:
                 self.best_val_f1 = val_metrics['f1']
+                self.best_epoch = epoch + 1
+                self.epochs_without_improvement = 0
+                history['best_epoch'] = self.best_epoch
+                history['best_val_f1'] = self.best_val_f1
                 checkpoint_path = self.fold_dir / 'best_model.pt'
                 torch.save({
                     'model_state_dict': model.state_dict(),
@@ -196,13 +211,26 @@ class FoldTrainer:
                     'val_metrics': val_metrics,
                     'config': OmegaConf.to_container(self.cfg, resolve=True),
                 }, checkpoint_path)
-                print(f"✓ Best model saved (F1: {self.best_val_f1:.4f})")
+                print(f"✓ Best model saved (Epoch {self.best_epoch}, F1: {self.best_val_f1:.4f})")
+            else:
+                self.epochs_without_improvement += 1
+                if self.patience and self.epochs_without_improvement >= self.patience:
+                    print(
+                        f"✗ Early stopping triggered after {epoch + 1} epochs "
+                        f"(no F1 improvement for {self.patience} epochs)."
+                    )
+                    break
+
+        history['epochs_trained'] = len(history['train_loss'])
+        if history['best_epoch'] is None:
+            history['best_epoch'] = history['epochs_trained']
+            history['best_val_f1'] = self.best_val_f1
 
         # Save training history
         with open(self.fold_dir / 'history.json', 'w') as f:
             json.dump(history, f, indent=2)
 
-        return history, self.best_val_f1
+        return history, self.best_val_f1, self.best_epoch
 
 
 @hydra.main(version_base=None, config_path="../../conf", config_name="config")
@@ -217,6 +245,21 @@ def main(cfg: DictConfig):
     # Setup device
     device = 'cuda' if cfg.device.use_cuda and torch.cuda.is_available() else 'cpu'
     print(f"\nDevice: {device}")
+
+    # Prepare run directory with timestamp and model signature
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    experiment_base = str(cfg.output.experiment_name or "experiment").replace(" ", "_")
+    model_label = cfg.model.name.replace("/", "_")
+    output_root = Path(to_absolute_path(cfg.output.base_dir))
+    run_name = f"{experiment_base}-{model_label}-{timestamp}"
+    run_dir = output_root / run_name
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    print(f"\nRun directory: {run_dir}")
+
+    # Persist resolved Hydra configuration for reproducibility
+    with open(run_dir / 'config.yaml', 'w') as config_file:
+        config_file.write(OmegaConf.to_yaml(cfg))
 
     # Load tokenizer
     print(f"\nLoading tokenizer: {cfg.model.name}")
@@ -291,8 +334,8 @@ def main(cfg: DictConfig):
             print(f"\nUsing class weights: {class_weights.numpy()}")
 
         # Train fold
-        trainer = FoldTrainer(cfg, fold_idx, device)
-        history, best_f1 = trainer.train_fold(model, train_loader, val_loader, class_weights)
+        trainer = FoldTrainer(cfg, fold_idx, run_dir, device)
+        history, best_f1, best_epoch = trainer.train_fold(model, train_loader, val_loader, class_weights)
 
         fold_results.append({
             'fold': fold_idx,
@@ -300,6 +343,8 @@ def main(cfg: DictConfig):
             'final_train_loss': history['train_loss'][-1],
             'final_val_loss': history['val_loss'][-1],
             'final_val_accuracy': history['val_accuracy'][-1],
+            'best_epoch': best_epoch,
+            'epochs_trained': history['epochs_trained'],
         })
 
         print(f"\nFold {fold_idx} completed. Best F1: {best_f1:.4f}")
@@ -321,8 +366,7 @@ def main(cfg: DictConfig):
     print(f"Max F1: {results_df['best_val_f1'].max():.4f}")
 
     # Save aggregate results
-    output_dir = Path(cfg.output.base_dir) / cfg.output.experiment_name
-    results_df.to_csv(output_dir / 'cv_results.csv', index=False)
+    results_df.to_csv(run_dir / 'cv_results.csv', index=False)
 
     aggregate_results = {
         'mean_f1': float(mean_f1),
@@ -331,12 +375,19 @@ def main(cfg: DictConfig):
         'max_f1': float(results_df['best_val_f1'].max()),
         'fold_results': fold_results,
         'config': OmegaConf.to_container(cfg, resolve=True),
+        'run_metadata': {
+            'timestamp': timestamp,
+            'run_name': run_name,
+            'model_name': cfg.model.name,
+            'experiment_name': cfg.output.experiment_name,
+            'output_directory': str(run_dir),
+        },
     }
 
-    with open(output_dir / 'aggregate_results.json', 'w') as f:
+    with open(run_dir / 'aggregate_results.json', 'w') as f:
         json.dump(aggregate_results, f, indent=2)
 
-    print(f"\nResults saved to: {output_dir}")
+    print(f"\nResults saved to: {run_dir}")
     print("="*60)
 
 

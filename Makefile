@@ -1,7 +1,7 @@
 # Makefile for Gemma Encoder on ReDSM5
 # Usage: make <target>
 
-.PHONY: help install test clean train train-5fold train-quick evaluate lint format check-gpu
+.PHONY: help install test clean train train-5fold train-5fold-mentallama train-5fold-gemma train-5fold-both train-quick evaluate lint format check-gpu
 
 # Default target
 .DEFAULT_GOAL := help
@@ -25,8 +25,17 @@ install-dev: ## Install with development dependencies
 train: ## Train with original script (single split)
 	python src/training/train_gemma.py
 
-train-5fold: ## Train with 5-fold cross-validation (Hydra)
-	python src/training/train_gemma_hydra.py
+train-5fold: train-5fold-mentallama ## Alias: run default 5-fold training (MentaLLaMA)
+
+train-5fold-mentallama: ## Train 5-fold CV with MentaLLaMA-chat-7B encoder
+	python src/training/train_gemma_hydra.py output.experiment_name=mentallama_5fold
+
+train-5fold-gemma: ## Train 5-fold CV with Gemma-2 (unfrozen encoder)
+	python src/training/train_gemma_hydra.py model.name=google/gemma-2-9b model.freeze_encoder=false training.batch_size=2 output.experiment_name=gemma_5fold
+
+train-5fold-both: ## Train 5-fold CV sequentially for MentaLLaMA then Gemma
+	@$(MAKE) train-5fold-mentallama
+	@$(MAKE) train-5fold-gemma
 
 train-quick: ## Quick test (2 folds, 3 epochs)
 	python src/training/train_gemma_hydra.py experiment=quick_test
@@ -50,15 +59,44 @@ evaluate: ## Evaluate trained model (requires --checkpoint argument)
 	fi
 	python src/training/evaluate.py --checkpoint $(CHECKPOINT)
 
-evaluate-best: ## Evaluate best model from 5-fold CV
-	python src/training/evaluate.py --checkpoint outputs/gemma_5fold/fold_0/best_model.pt
-
-show-results: ## Show aggregate 5-fold CV results
-	@if [ -f outputs/gemma_5fold/aggregate_results.json ]; then \
-		cat outputs/gemma_5fold/aggregate_results.json | python -m json.tool; \
+evaluate-best: ## Evaluate best model from a 5-fold run (override with RUN=outputs/<run_dir>)
+	@if [ -z "$(RUN)" ]; then \
+		RUN_DIR=$$(for dir in $$(ls -td outputs/*/ 2>/dev/null); do \
+			if [ -f "$${dir}fold_0/best_model.pt" ]; then echo $$dir; fi; \
+		done | head -n 1); \
 	else \
-		echo "No results found. Run 'make train-5fold' first."; \
-	fi
+		RUN_DIR="$(RUN)"; \
+	fi; \
+	if [ -z "$$RUN_DIR" ]; then \
+		echo "No run directory found. Run 'make train-5fold' first."; \
+		exit 1; \
+	fi; \
+	if [ ! -f "$${RUN_DIR%/}/fold_0/best_model.pt" ]; then \
+		echo "Best checkpoint not found in $$RUN_DIR/fold_0/"; \
+		exit 1; \
+	fi; \
+	CHECKPOINT="$${RUN_DIR%/}/fold_0/best_model.pt"; \
+	echo "Evaluating checkpoint $$CHECKPOINT"; \
+	python src/training/evaluate.py --checkpoint "$$CHECKPOINT"
+
+show-results: ## Show aggregate 5-fold results for latest run (override with RUN=outputs/<run_dir>)
+	@if [ -z "$(RUN)" ]; then \
+		RUN_DIR=$$(for dir in $$(ls -td outputs/*/ 2>/dev/null); do \
+			if [ -f "$${dir}aggregate_results.json" ]; then echo $$dir; fi; \
+		done | head -n 1); \
+	else \
+		RUN_DIR="$(RUN)"; \
+	fi; \
+	if [ -z "$$RUN_DIR" ]; then \
+		echo "No run directory found. Run 'make train-5fold' first."; \
+		exit 1; \
+	fi; \
+	if [ ! -f "$${RUN_DIR%/}/aggregate_results.json" ]; then \
+		echo "aggregate_results.json not found in $$RUN_DIR"; \
+		exit 1; \
+	fi; \
+	echo "Showing aggregate results from $$RUN_DIR"; \
+	cat "$${RUN_DIR%/}/aggregate_results.json" | python -m json.tool
 
 ##@ Data
 

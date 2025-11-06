@@ -16,13 +16,14 @@ model:
 
 # Training configuration
 training:
-  num_epochs: 10
+  num_epochs: 100
   batch_size: 4  # Increased since encoder is frozen (no gradients for 7B params)
   learning_rate: 2e-5
   weight_decay: 0.01
   warmup_ratio: 0.1
   max_grad_norm: 1.0
   use_class_weights: true
+  early_stopping_patience: 20  # Stop if macro-F1 does not improve for 20 epochs
 
 # Data configuration
 data:
@@ -41,7 +42,7 @@ cv:
 # Output configuration
 output:
   base_dir: outputs
-  experiment_name: gemma_5fold
+  experiment_name: mentallama_5fold
   save_best_only: true
   save_predictions: true
 

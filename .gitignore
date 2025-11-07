@@ -43,6 +43,7 @@ outputs/
 
 # Data
 data/
+!src/data/  # But allow src/data/ python modules
 *.csv
 *.json.gz
 *.parquet

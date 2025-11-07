@@ -1,0 +1,46 @@
+# Hydra configuration for Binary Post-Criterion Matching
+# Task: Given (post, criterion), predict match (1) or no-match (0)
+
+defaults:
+  - _self_
+
+# Model configuration
+model:
+  name: google/gemma-2-2b  # or klyang/MentaLLaMA-chat-7B
+  pooling_strategy: mean  # Options: mean, cls, max, attention
+  freeze_encoder: true  # Freeze base model, only train classifier
+  dropout: 0.1
+
+# Training configuration
+training:
+  num_epochs: 20
+  batch_size: 8  # Can be larger since encoder is frozen
+  learning_rate: 3e-5
+  weight_decay: 0.01
+  warmup_ratio: 0.1
+  max_grad_norm: 1.0
+  use_class_weights: true  # Handle class imbalance
+  early_stopping_patience: 5  # Stop if no improvement for 5 epochs
+
+# Data configuration
+data:
+  data_dir: data/redsm5
+  max_length: 512
+  negative_sampling: all  # Options: 'all' (1:9 ratio), 'random' (custom ratio)
+  num_negatives: 3  # Used only if negative_sampling='random'
+
+# Output configuration
+output:
+  base_dir: outputs
+  experiment_name: binary_matching
+  save_best_only: true
+  save_predictions: true
+
+# Logging
+logging:
+  log_interval: 10  # Log every N batches
+
+# Device configuration
+device:
+  use_cuda: true
+  mixed_precision: true  # Use bfloat16

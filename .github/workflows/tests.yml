@@ -1,0 +1,175 @@
+name: Tests
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  schedule:
+    # Run tests nightly at 2 AM UTC
+    - cron: '0 2 * * *'
+
+jobs:
+  test:
+    name: Test Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.8', '3.9', '3.10', '3.11']
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+        cache: 'pip'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pytest pytest-cov pytest-xdist
+
+    - name: Check syntax
+      run: |
+        python -m py_compile src/**/*.py tests/**/*.py
+
+    - name: Run tests
+      run: |
+        pytest tests/ -v --tb=short --cov=src --cov-report=xml --cov-report=term-missing -n auto
+
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./coverage.xml
+        flags: unittests
+        name: codecov-${{ matrix.python-version }}
+
+  lint:
+    name: Code Quality
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+        cache: 'pip'
+
+    - name: Install linting tools
+      run: |
+        python -m pip install --upgrade pip
+        pip install black flake8 mypy isort
+
+    - name: Check formatting with Black
+      run: |
+        black --check --diff src/ tests/
+
+    - name: Check imports with isort
+      run: |
+        isort --check-only --diff src/ tests/
+
+    - name: Lint with flake8
+      run: |
+        flake8 src/ tests/ --max-line-length=100 --extend-ignore=E203,W503
+
+    - name: Type check with mypy
+      run: |
+        mypy src/ --ignore-missing-imports --no-strict-optional
+      continue-on-error: true  # Don't fail build on type errors (yet)
+
+  security:
+    name: Security Scan
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install safety bandit
+
+    - name: Check dependencies for vulnerabilities
+      run: |
+        pip install -r requirements.txt
+        safety check --json
+      continue-on-error: true
+
+    - name: Check code for security issues
+      run: |
+        bandit -r src/ -f json -o bandit-report.json
+      continue-on-error: true
+
+    - name: Upload security reports
+      uses: actions/upload-artifact@v3
+      with:
+        name: security-reports
+        path: |
+          bandit-report.json
+
+  docs:
+    name: Documentation Check
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Check for broken links in markdown
+      uses: gaurav-nelson/github-action-markdown-link-check@v1
+      with:
+        use-quiet-mode: 'yes'
+        config-file: '.github/markdown-link-check-config.json'
+      continue-on-error: true
+
+    - name: Validate README structure
+      run: |
+        if [ ! -f README.md ]; then
+          echo "README.md not found!"
+          exit 1
+        fi
+        if [ ! -f CONTRIBUTING.md ]; then
+          echo "CONTRIBUTING.md not found!"
+          exit 1
+        fi
+        echo "Documentation files present"
+
+  build-summary:
+    name: Build Summary
+    runs-on: ubuntu-latest
+    needs: [test, lint, security, docs]
+    if: always()
+
+    steps:
+    - name: Check build status
+      run: |
+        echo "Test Status: ${{ needs.test.result }}"
+        echo "Lint Status: ${{ needs.lint.result }}"
+        echo "Security Status: ${{ needs.security.result }}"
+        echo "Docs Status: ${{ needs.docs.result }}"
+
+        if [ "${{ needs.test.result }}" != "success" ]; then
+          echo "Tests failed!"
+          exit 1
+        fi
+
+        if [ "${{ needs.lint.result }}" != "success" ]; then
+          echo "Linting failed!"
+          exit 1
+        fi
+
+        echo "All checks passed!"

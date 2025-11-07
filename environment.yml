@@ -1,0 +1,14 @@
+name: redsm5
+channels:
+  - pytorch
+  - nvidia
+  - conda-forge
+dependencies:
+  - python=3.10
+  - pytorch=2.2.2
+  - torchvision=0.17.2
+  - torchaudio=2.2.2
+  - cudatoolkit=11.8
+  - pip
+  - pip:
+      - -r requirements.txt

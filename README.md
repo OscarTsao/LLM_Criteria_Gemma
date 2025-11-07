@@ -1,182 +1,98 @@
-# Gemma Encoder for DSM-5 Criteria Matching
+# ReDSM5 Sentence-Level Multi-Label Classification
 
-Implementation of the Gemma Encoder architecture from the paper ["Adapting Decoder-Based Language Models for Diverse Encoder Downstream Tasks"](https://arxiv.org/abs/2503.02656) applied to DSM-5 mental health criteria matching using the ReDSM5 dataset.
+This repository provides a reproducible pipeline for sentence-level DSM-5 criteria detection on the ReDSM5 dataset. It includes configurable encoder baselines, post-level aggregation strategies, OOF tracking, calibration utilities, and Optuna-based hyperparameter optimisation via Hydra.
 
-## Overview
-
-This project implements best methods from the Gemma Encoder paper for criteria matching tasks on the ReDSM5 dataset:
-- **Bidirectional attention** adaptation of Gemma decoder models
-- **Multiple pooling strategies** (Mean, First-K, Last-K, Attention-based)
-- **Hyperparameter optimization** for dropout rates and architecture
-- **GLUE-style evaluation metrics** for classification performance
-
-## Key Features
-
-### 1. Bidirectional Attention
-The critical innovation: converting Gemma's causal (unidirectional) attention to bidirectional attention dramatically improves performance on encoding tasks.
-
-```python
-from src.models.gemma_encoder import GemmaClassifier
-
-model = GemmaClassifier(
-    num_classes=10,
-    model_name="google/gemma-2-2b",
-    pooling_strategy="mean"
-)
-```
-
-### 2. Multiple Pooling Strategies
-Implemented poolers from the paper:
-- **Mean Pooling**: Average over all tokens
-- **First-K Pooling**: Aggregate first K tokens
-- **Last-K Pooling**: Aggregate last K tokens
-- **Attention Pooling (KV)**: Learnable query over key-value pairs
-- **Attention Pooling (Query)**: Multi-head probe attention
-
-### 3. ReDSM5 Dataset
-The ReDSM5 dataset contains 1,484 Reddit posts annotated for 9 DSM-5 depression symptoms:
-- DEPRESSED_MOOD
-- ANHEDONIA
-- APPETITE_CHANGE
-- SLEEP_ISSUES
-- PSYCHOMOTOR
-- FATIGUE
-- WORTHLESSNESS
-- COGNITIVE_ISSUES
-- SUICIDAL_THOUGHTS
-- SPECIAL_CASE (expert discrimination cases)
-
-## Installation
+## Quickstart
 
 ```bash
-# Clone the repository (if applicable)
-cd /media/cvrlab308/cvrlab308_4090/YuNing/LLM_Criteria_Gemma
+# 1. Environment
+conda env create -f environment.yml
+conda activate redsm5
 
-# Install dependencies
+# 2. Install editable package (optional)
 pip install -r requirements.txt
+
+# 3. Stage data
+tree data/redsm5
+# ├── redsm5_annotations.csv
+# └── redsm5_posts.csv
+
+# 4. Run a baseline (MentalBERT)
+python -m src.training.train model=mentalbert
+
+# 5. Evaluate a fold checkpoint with calibration & aggregation
+python -m src.cli.run_eval ckpt_dir=outputs/<run>/fold_0 \
+  calib.method=temp agg.strategy=attention
 ```
 
-## Quick Start
+Add `-m hpo=optuna` to `src.training.train` for multi-run sweeps, or use the convenience scripts in `scripts/`.
 
-### 1. Prepare Data
-The ReDSM5 dataset should be in `data/redsm5/`:
-```
-data/redsm5/
-├── redsm5_posts.csv
-├── redsm5_annotations.csv
-└── README.md
-```
+## Features
 
-### 2. Train Model
-```bash
-python src/training/train_gemma.py
-```
+- Sentence-level datasets with leak-safe post splits (`src/data/`)
+- Encoder registry supporting MentalBERT, DeBERTa-V3, ModernBERT, and Gemma-2 adapters with optional LoRA
+- Training loop with macro-AUPRC early stopping, AMP, gradient accumulation, and fold-wise OOF logging
+- Calibration (temperature / isotonic), per-class threshold sweeps, and coverage-risk reporting
+- CLI tooling for evaluation and OOF merges under `src/cli/`
 
-### 3. Evaluate
-```bash
-python src/training/evaluate.py --checkpoint outputs/gemma_criteria/best_model.pt
-```
-
-## Project Structure
+## Project Layout
 
 ```
-LLM_Criteria_Gemma/
-├── data/
-│   └── redsm5/
-│       ├── redsm5_posts.csv
-│       └── redsm5_annotations.csv
-├── src/
-│   ├── models/
-│   │   ├── poolers.py            # Pooling strategies
-│   │   └── gemma_encoder.py      # Bidirectional Gemma encoder
-│   ├── data/
-│   │   └── redsm5_dataset.py     # Dataset loaders
-│   ├── training/
-│   │   ├── train_gemma.py        # Training script
-│   │   └── evaluate.py           # Evaluation script
-│   └── config/
-│       └── config.yaml           # Configuration
-├── outputs/                       # Training outputs
-├── requirements.txt
-└── README.md
+conf/                 # Hydra configs (data, model, train, sweeps)
+scripts/              # Baseline & Optuna sweep wrappers
+src/data/             # Dataset + split utilities
+src/models/           # Registry, pooling, classifier heads
+src/training/         # Train loop, losses, metrics
+src/eval/             # Aggregation, calibration, reports
+src/cli/              # Evaluation + OOF merge entry points
+tests/                # Pytest suites (see Tests section)
 ```
 
-## Configuration
+Model checkpoints, fold metrics, and OOF artefacts are stored under `outputs/<timestamp>/fold_k/`.
 
-Edit `src/config/config.yaml` to customize:
-- Model size (`google/gemma-2-2b`, `google/gemma-2-9b`, etc.)
-- Pooling strategy
-- Hyperparameters (learning rate, dropout, batch size)
-- Data splits
+## Training & HPO
 
-## Model Sizes
+- Baselines: `./scripts/run_baselines.sh`
+- Canonical 5-fold: `python -m src.training.train train.folds=5`
+- Optuna Sweep: `./scripts/run_sweep.sh` (configurable via `conf/hpo/optuna.yaml`)
 
-| Model | Parameters | GPU Memory | Recommendation |
-|-------|-----------|------------|----------------|
-| google/gemma-2-2b | 2B | ~8GB | Recommended for most tasks |
-| google/gemma-2-9b | 9B | ~20GB | Better performance, more resources |
-| google/gemma-2-27b | 27B | ~60GB | Best performance, high resources |
+Hydra config overrides follow `python -m src.training.train model=gemma2_encoder train.lr=3e-5 data.max_len=1024`.
 
-## Results
+## Evaluation
 
-Expected performance on ReDSM5 criteria matching:
-- **Accuracy**: 70-80%
-- **Macro F1**: 0.65-0.75
-- **Per-class F1**: Varies by symptom prevalence
-
-Comparison with baselines (from DataAug_Criteria_Evidence project):
-- BERT baseline: F1 ~0.65
-- RoBERTa baseline: F1 ~0.70
-- **Gemma-2-2b (ours)**: F1 ~0.72-0.75
-
-## Key Implementation Details
-
-### Bidirectional Attention
-From `src/models/gemma_encoder.py`:
-```python
-def _enable_bidirectional_attention(self):
-    """
-    Critical modification: removes causal mask to allow
-    bidirectional context flow during fine-tuning.
-    """
-    # Patches attention layers to disable causal masking
-    # while preserving padding masks
+```
+python -m src.cli.run_eval ckpt_dir=outputs/<run>/fold_0 \
+  calib.method=isotonic agg.strategy=max thresholds.grid_size=2001
 ```
 
-### Pooling Strategies
-From `src/models/poolers.py`:
-```python
-# Mean pooling (recommended)
-pooler = MeanPooler(hidden_dim=2048)
+Results (metrics, per-class CSV, reliability curve, coverage-risk) are written to `<ckpt_dir>/eval/<strategy>_<calib>/`.
 
-# Attention pooling with learnable query
-pooler = AttentionPoolerKV(hidden_dim=2048)
+For global OOF analysis across runs:
+```
+python -m src.cli.merge_oof runs=outputs/<run1> runs=outputs/<run2> \
+  output_dir=outputs/merged
 ```
 
-## Citation
+## Testing
 
-If you use this implementation, please cite the Gemma Encoder paper and ReDSM5 dataset:
+Install dev dependencies (`make install-dev` or `pip install -r requirements.txt`) and run:
 
-```bibtex
-@article{suganthan2025gemma,
-  title={Adapting Decoder-Based Language Models for Diverse Encoder Downstream Tasks},
-  author={Suganthan, Paul and Moiseev, Fedor and others},
-  journal={arXiv preprint arXiv:2503.02656},
-  year={2025}
-}
-
-@article{bao2025redsm5,
-  title={ReDSM5: A Reddit Dataset for DSM-5 Depression Detection},
-  author={Bao, Eliseo and Pérez, Anxo and Parapar, Javier},
-  journal={arXiv preprint arXiv:2508.03399},
-  year={2025}
-}
+```
+pytest
 ```
 
-## License
+The GitHub Action includes unit tests plus a 1-epoch CPU smoke pass to ensure import integrity.
 
-Apache 2.0 (following ReDSM5 dataset license)
+## Safety & Clinical Use
 
-## Contact
+This system is a research prototype for DSM-5 criteria detection. It must **not** be used for diagnosis, triage, or any clinical decision without qualified oversight. Refer to `MODEL_CARD.md` for limitations, escalation guidance, and abstention recommendations. Always strip PHI before logging or exporting predictions.
 
-For questions about the implementation or results, please open an issue or contact the project maintainers.
+## Benchmarks
+
+| Model | Macro-AUPRC | Macro-F1 | Notes |
+|-------|-------------|----------|-------|
+| MentalBERT | TBD | TBD | Sentence-level training |
+| DeBERTa-V3 | TBD | TBD | Baseline config |
+| Gemma2 + LoRA | TBD | TBD | Attention aggregation |
+
+Update this table after confirming results in `outputs/<run>/summary.json`.

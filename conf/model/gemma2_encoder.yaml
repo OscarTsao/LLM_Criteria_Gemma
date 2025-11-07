@@ -1,0 +1,17 @@
+model_name: google/gemma-2-2b
+pooling_strategy: attention_kv
+first_k: 128
+last_k: 128
+hidden_dropout: 0.1
+classifier_hidden_dim: null
+grad_checkpointing: true
+freeze_base_model: false
+peft:
+  enable_lora: true
+  lora_r: 16
+  lora_alpha: 32
+  lora_dropout: 0.05
+  target_modules: null
+attention_pool:
+  num_heads: 4
+  dropout: 0.1

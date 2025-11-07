@@ -1,0 +1,7 @@
+{
+  "fold": 0,
+  "seed": 42,
+  "stratified": false,
+  "train_posts": ["p1", "p3"],
+  "val_posts": ["p2"]
+}

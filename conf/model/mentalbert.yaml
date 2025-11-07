@@ -1,0 +1,14 @@
+model_name: mental/mental-bert-base-uncased
+pooling_strategy: mean
+first_k: 128
+last_k: 128
+hidden_dropout: 0.1
+classifier_hidden_dim: null
+grad_checkpointing: false
+freeze_base_model: false
+peft:
+  enable_lora: false
+  lora_r: 16
+  lora_alpha: 32
+  lora_dropout: 0.05
+  target_modules: null

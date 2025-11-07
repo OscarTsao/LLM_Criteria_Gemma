@@ -1,0 +1,202 @@
+"""
+ReDSM5 Dataset for DSM-5 Criteria Matching
+
+This module provides dataset loaders for the ReDSM5 corpus - a dataset of Reddit
+posts annotated with DSM-5 major depressive episode symptoms.
+"""
+
+import pandas as pd
+import torch
+from torch.utils.data import Dataset
+from typing import Dict, List, Tuple, Optional
+from pathlib import Path
+import numpy as np
+from sklearn.model_selection import train_test_split
+
+
+# DSM-5 symptom mapping to indices
+SYMPTOM_TO_IDX = {
+    'DEPRESSED_MOOD': 0,
+    'ANHEDONIA': 1,
+    'APPETITE_CHANGE': 2,
+    'SLEEP_ISSUES': 3,
+    'PSYCHOMOTOR': 4,
+    'FATIGUE': 5,
+    'WORTHLESSNESS': 6,
+    'COGNITIVE_ISSUES': 7,
+    'SUICIDAL_THOUGHTS': 8,
+    'SPECIAL_CASE': 9,
+}
+
+IDX_TO_SYMPTOM = {v: k for k, v in SYMPTOM_TO_IDX.items()}
+NUM_CLASSES = len(SYMPTOM_TO_IDX)
+
+
+class ReDSM5Dataset(Dataset):
+    """
+    PyTorch Dataset for ReDSM5 criteria matching task.
+
+    Args:
+        annotations_path: Path to redsm5_annotations.csv
+        posts_path: Path to redsm5_posts.csv (optional, for full post context)
+        tokenizer: HuggingFace tokenizer for encoding text
+        max_length: Maximum sequence length for tokenization
+        include_explanations: Whether to include expert explanations
+    """
+
+    def __init__(
+        self,
+        annotations_path: str,
+        posts_path: Optional[str] = None,
+        tokenizer=None,
+        max_length: int = 512,
+        include_explanations: bool = False,
+    ):
+        self.annotations = pd.read_csv(annotations_path)
+        self.posts = pd.read_csv(posts_path) if posts_path else None
+        self.tokenizer = tokenizer
+        self.max_length = max_length
+        self.include_explanations = include_explanations
+
+        # Filter out invalid rows
+        self.annotations = self.annotations.dropna(subset=['sentence_text', 'DSM5_symptom', 'status'])
+
+    def __len__(self) -> int:
+        return len(self.annotations)
+
+    def __getitem__(self, idx: int) -> Dict:
+        row = self.annotations.iloc[idx]
+
+        text = row['sentence_text']
+        symptom = row['DSM5_symptom']
+        label = int(row['status'])  # 0 or 1
+
+        # Map symptom to class index
+        symptom_idx = SYMPTOM_TO_IDX.get(symptom, SYMPTOM_TO_IDX['SPECIAL_CASE'])
+
+        item = {
+            'text': text,
+            'label': label,
+            'symptom': symptom,
+            'symptom_idx': symptom_idx,
+            'post_id': row.get('post_id', ''),
+            'sentence_id': row.get('sentence_id', ''),
+        }
+
+        if self.include_explanations and 'explanation' in row:
+            item['explanation'] = row['explanation']
+
+        # Tokenize if tokenizer provided
+        if self.tokenizer is not None:
+            encoding = self.tokenizer(
+                text,
+                max_length=self.max_length,
+                padding='max_length',
+                truncation=True,
+                return_tensors='pt'
+            )
+            item['input_ids'] = encoding['input_ids'].squeeze(0)
+            item['attention_mask'] = encoding['attention_mask'].squeeze(0)
+
+        return item
+
+    def get_class_distribution(self) -> Dict[str, int]:
+        """Get distribution of symptoms in the dataset."""
+        return self.annotations['DSM5_symptom'].value_counts().to_dict()
+
+    def get_label_distribution(self) -> Dict[int, int]:
+        """Get distribution of status labels (0/1)."""
+        return self.annotations['status'].value_counts().to_dict()
+
+
+def load_redsm5(
+    data_dir: str,
+    tokenizer=None,
+    max_length: int = 512,
+    train_split: float = 0.7,
+    val_split: float = 0.15,
+    test_split: float = 0.15,
+    random_seed: int = 42,
+) -> Tuple[ReDSM5Dataset, ReDSM5Dataset, ReDSM5Dataset]:
+    """
+    Load ReDSM5 dataset and split into train/val/test.
+
+    Args:
+        data_dir: Directory containing redsm5_annotations.csv and redsm5_posts.csv
+        tokenizer: HuggingFace tokenizer
+        max_length: Maximum sequence length
+        train_split: Fraction for training set
+        val_split: Fraction for validation set
+        test_split: Fraction for test set
+        random_seed: Random seed for reproducibility
+
+    Returns:
+        Tuple of (train_dataset, val_dataset, test_dataset)
+    """
+    data_path = Path(data_dir)
+    annotations_path = data_path / 'redsm5_annotations.csv'
+    posts_path = data_path / 'redsm5_posts.csv'
+
+    # Load full dataset
+    df = pd.read_csv(annotations_path)
+    df = df.dropna(subset=['sentence_text', 'DSM5_symptom', 'status'])
+
+    # Stratified split by symptom to maintain class balance
+    train_df, temp_df = train_test_split(
+        df,
+        test_size=(val_split + test_split),
+        stratify=df['DSM5_symptom'],
+        random_state=random_seed
+    )
+
+    val_df, test_df = train_test_split(
+        temp_df,
+        test_size=test_split / (val_split + test_split),
+        stratify=temp_df['DSM5_symptom'],
+        random_state=random_seed
+    )
+
+    # Save splits to temporary CSVs
+    train_path = data_path / 'train_annotations.csv'
+    val_path = data_path / 'val_annotations.csv'
+    test_path = data_path / 'test_annotations.csv'
+
+    train_df.to_csv(train_path, index=False)
+    val_df.to_csv(val_path, index=False)
+    test_df.to_csv(test_path, index=False)
+
+    # Create datasets
+    train_dataset = ReDSM5Dataset(train_path, str(posts_path) if posts_path.exists() else None, tokenizer, max_length)
+    val_dataset = ReDSM5Dataset(val_path, str(posts_path) if posts_path.exists() else None, tokenizer, max_length)
+    test_dataset = ReDSM5Dataset(test_path, str(posts_path) if posts_path.exists() else None, tokenizer, max_length)
+
+    print(f"Train: {len(train_dataset)}, Val: {len(val_dataset)}, Test: {len(test_dataset)}")
+
+    return train_dataset, val_dataset, test_dataset
+
+
+def get_class_weights(dataset: ReDSM5Dataset) -> torch.Tensor:
+    """
+    Compute class weights for handling imbalance.
+
+    Args:
+        dataset: ReDSM5Dataset instance
+
+    Returns:
+        Tensor of class weights
+    """
+    class_counts = np.zeros(NUM_CLASSES)
+    for i in range(len(dataset)):
+        symptom_idx = dataset[i]['symptom_idx']
+        class_counts[symptom_idx] += 1
+
+    # Inverse frequency weighting
+    weights = 1.0 / (class_counts + 1e-6)
+    weights = weights / weights.sum() * NUM_CLASSES
+
+    return torch.FloatTensor(weights)
+
+
+def get_symptom_labels() -> List[str]:
+    """Return list of symptom names in order."""
+    return [IDX_TO_SYMPTOM[i] for i in range(NUM_CLASSES)]

@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Run unit tests
+        run: pytest
+      - name: 1-epoch smoke train (CPU)
+        env:
+          HYDRA_FULL_ERROR: "1"
+        run: |
+          python -m src.training.train data=debug \
+            train.folds=1 train.epochs=1 \
+            train.batch_size=2 train.grad_accum=1 \
+            train.logging.save_oof=false \
+            train.amp=false \
+            train.scheduler=linear \
+            train.warmup_ratio=0.0 \
+            train.early_stopping.patience=1

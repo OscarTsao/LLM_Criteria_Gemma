@@ -1,37 +1,29 @@
-"""Gemma encoder models and pooling strategies."""
+"""Model registry exports."""
 
-from .poolers import (
-    BasePooler,
-    FirstKPooler,
-    LastKPooler,
-    MeanPooler,
-    CLSPooler,
-    MaxPooler,
-    AttentionPooler,
-    get_pooler,
-    POOLER_REGISTRY,
+from .heads import ModelOutput, MultiLabelClassificationHead, TokenRationaleHead
+from .pooling import (
+    AttentionKeyValuePooling,
+    AttentionQueryPooling,
+    FirstKPooling,
+    LastKPooling,
+    MeanPooling,
+    PoolingLayer,
+    build_pooler,
 )
-
-from .gemma_encoder import (
-    GemmaEncoder,
-    GemmaClassifier,
-    count_parameters,
-)
+from .registry import ModelBundle, SentenceClassificationModel, build_model
 
 __all__ = [
-    # Poolers
-    'BasePooler',
-    'FirstKPooler',
-    'LastKPooler',
-    'MeanPooler',
-    'CLSPooler',
-    'MaxPooler',
-    'AttentionPooler',
-    'get_pooler',
-    'POOLER_REGISTRY',
-    # Encoders
-    'GemmaEncoder',
-    'GemmaClassifier',
-    # Utils
-    'count_parameters',
+    "ModelOutput",
+    "MultiLabelClassificationHead",
+    "TokenRationaleHead",
+    "AttentionKeyValuePooling",
+    "AttentionQueryPooling",
+    "FirstKPooling",
+    "LastKPooling",
+    "MeanPooling",
+    "PoolingLayer",
+    "build_pooler",
+    "ModelBundle",
+    "SentenceClassificationModel",
+    "build_model",
 ]

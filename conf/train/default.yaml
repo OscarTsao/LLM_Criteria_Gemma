@@ -1,0 +1,45 @@
+seed: 42
+device: cuda
+folds: 5
+epochs: 10
+batch_size: 16
+grad_accum: 2
+lr: 1.5e-5
+weight_decay: 0.05
+dropout: 0.1
+scheduler: cosine
+warmup_ratio: 0.06
+max_grad_norm: 1.0
+amp: true
+amp_precision: bf16
+loss:
+  name: bce
+  focal_gamma: 1.5
+  class_weights: null
+optim:
+  betas:
+    - 0.9
+    - 0.999
+  eps: 1.0e-8
+logging:
+  out_dir: outputs/${now:%Y%m%d_%H%M%S}
+  save_oof: true
+  log_interval: 50
+  eval_interval: 1
+early_stopping:
+  monitor: val/macro_auprc
+  mode: max
+  patience: 3
+  min_delta: 1.0e-4
+evaluation:
+  threshold: 0.5
+  pr_points: 200
+  ece_bins: 15
+calib:
+  method: none
+  temperature_init: 1.0
+  isotonic_out_of_bounds: clip
+reproducibility:
+  torch_deterministic: true
+  numpy_seed: ${seed}
+  python_seed: ${seed}

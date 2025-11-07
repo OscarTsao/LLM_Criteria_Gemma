@@ -43,6 +43,8 @@ outputs/
 
 # Data
 data/
+!src/data/
+!src/data/**
 *.csv
 *.json.gz
 *.parquet

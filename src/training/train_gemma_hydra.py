@@ -30,12 +30,13 @@ sys.path.append(str(Path(__file__).parent.parent))
 from models.gemma_encoder import GemmaClassifier
 from data.redsm5_dataset import get_class_weights, NUM_CLASSES
 from data.cv_splits import create_cv_splits, load_fold_split, get_fold_statistics
+from utils.logger import setup_logger, log_experiment_config, log_training_summary
 
 
 class FoldTrainer:
     """Trainer for a single fold."""
 
-    def __init__(self, cfg: DictConfig, fold_idx: int, run_dir: Path, device: str = 'cuda'):
+    def __init__(self, cfg: DictConfig, fold_idx: int, run_dir: Path, device: str = 'cuda', logger=None):
         self.cfg = cfg
         self.fold_idx = fold_idx
         self.device = device
@@ -45,6 +46,7 @@ class FoldTrainer:
         self.epochs_without_improvement = 0
         self.patience = cfg.training.get('early_stopping_patience')
         self.min_delta = float(cfg.training.get('early_stopping_min_delta', 0.0))
+        self.logger = logger
 
         # Initialize AMP scaler for mixed precision training
         self.use_amp = cfg.device.mixed_precision
@@ -175,12 +177,14 @@ class FoldTrainer:
             'epochs_trained': 0,
         }
 
-        print(f"\n{'='*60}")
-        print(f"Training Fold {self.fold_idx}")
-        print(f"{'='*60}")
+        if self.logger:
+            self.logger.info("=" * 60)
+            self.logger.info(f"Training Fold {self.fold_idx}")
+            self.logger.info("=" * 60)
 
         for epoch in range(self.cfg.training.num_epochs):
-            print(f"\nEpoch {epoch + 1}/{self.cfg.training.num_epochs}")
+            if self.logger:
+                self.logger.info(f"Epoch {epoch + 1}/{self.cfg.training.num_epochs}")
 
             train_loss = self.train_epoch(model, train_loader, optimizer, scheduler, criterion)
             val_metrics = self.evaluate(model, val_loader, criterion)
@@ -191,10 +195,15 @@ class FoldTrainer:
             history['val_accuracy'].append(val_metrics['accuracy'])
             history['val_f1'].append(val_metrics['f1'])
 
-            print(f"Train Loss: {train_loss:.4f}")
-            print(f"Val Loss: {val_metrics['loss']:.4f}")
-            print(f"Val Accuracy: {val_metrics['accuracy']:.4f}")
-            print(f"Val F1: {val_metrics['f1']:.4f}")
+            if self.logger:
+                log_training_summary(
+                    self.logger,
+                    fold=self.fold_idx,
+                    epoch=epoch + 1,
+                    train_loss=train_loss,
+                    val_metrics=val_metrics,
+                    is_best=False,
+                )
 
             # Save best model
             improved = val_metrics['f1'] > (self.best_val_f1 + self.min_delta)
@@ -212,14 +221,16 @@ class FoldTrainer:
                     'val_metrics': val_metrics,
                     'config': OmegaConf.to_container(self.cfg, resolve=True),
                 }, checkpoint_path)
-                print(f"✓ Best model saved (Epoch {self.best_epoch}, F1: {self.best_val_f1:.4f})")
+                if self.logger:
+                    self.logger.info(f"✓ Best model saved (Epoch {self.best_epoch}, F1: {self.best_val_f1:.4f})")
             else:
                 self.epochs_without_improvement += 1
                 if self.patience and self.epochs_without_improvement >= self.patience:
-                    print(
-                        f"✗ Early stopping triggered after {epoch + 1} epochs "
-                        f"(no F1 improvement for {self.patience} epochs)."
-                    )
+                    if self.logger:
+                        self.logger.warning(
+                            f"✗ Early stopping triggered after {epoch + 1} epochs "
+                            f"(no F1 improvement for {self.patience} epochs)."
+                        )
                     break
 
         history['epochs_trained'] = len(history['train_loss'])
@@ -238,15 +249,6 @@ class FoldTrainer:
 def main(cfg: DictConfig):
     """Main training function with 5-fold CV."""
 
-    print("\n" + "="*60)
-    print("Gemma Encoder 5-Fold Cross-Validation")
-    print("="*60)
-    print(OmegaConf.to_yaml(cfg))
-
-    # Setup device
-    device = 'cuda' if cfg.device.use_cuda and torch.cuda.is_available() else 'cpu'
-    print(f"\nDevice: {device}")
-
     # Prepare run directory with timestamp and model signature
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     experiment_base = str(cfg.output.experiment_name or "experiment").replace(" ", "_")
@@ -256,18 +258,36 @@ def main(cfg: DictConfig):
     run_dir = output_root / run_name
     run_dir.mkdir(parents=True, exist_ok=True)
 
-    print(f"\nRun directory: {run_dir}")
+    # Setup logger
+    logger = setup_logger(
+        name='train_gemma_hydra',
+        level='INFO',
+        log_file=run_dir / 'training.log',
+        console=True,
+    )
+
+    logger.info("=" * 60)
+    logger.info("Gemma Encoder 5-Fold Cross-Validation")
+    logger.info("=" * 60)
+
+    # Log configuration
+    log_experiment_config(logger, OmegaConf.to_container(cfg, resolve=True))
+
+    # Setup device
+    device = 'cuda' if cfg.device.use_cuda and torch.cuda.is_available() else 'cpu'
+    logger.info(f"Device: {device}")
+    logger.info(f"Run directory: {run_dir}")
 
     # Persist resolved Hydra configuration for reproducibility
     with open(run_dir / 'config.yaml', 'w') as config_file:
         config_file.write(OmegaConf.to_yaml(cfg))
 
     # Load tokenizer
-    print(f"\nLoading tokenizer: {cfg.model.name}")
+    logger.info(f"Loading tokenizer: {cfg.model.name}")
     tokenizer = AutoTokenizer.from_pretrained(cfg.model.name)
 
     # Create CV splits
-    print(f"\nCreating {cfg.cv.num_folds}-fold cross-validation splits...")
+    logger.info(f"Creating {cfg.cv.num_folds}-fold cross-validation splits...")
     splits_dir = Path(cfg.data.data_dir) / 'cv_splits'
 
     annotations_path = Path(cfg.data.data_dir) / 'redsm5_annotations.csv'
@@ -280,16 +300,16 @@ def main(cfg: DictConfig):
 
     # Print fold statistics
     stats = get_fold_statistics(splits)
-    print("\nFold Statistics:")
-    print(stats[['fold', 'train_size', 'val_size']])
+    logger.info("Fold Statistics:")
+    logger.info(f"\n{stats[['fold', 'train_size', 'val_size']]}")
 
     # Train each fold
     fold_results = []
 
     for fold_idx in range(cfg.cv.num_folds):
-        print(f"\n{'='*60}")
-        print(f"Starting Fold {fold_idx + 1}/{cfg.cv.num_folds}")
-        print(f"{'='*60}")
+        logger.info("=" * 60)
+        logger.info(f"Starting Fold {fold_idx + 1}/{cfg.cv.num_folds}")
+        logger.info("=" * 60)
 
         # Load fold data
         posts_path = Path(cfg.data.data_dir) / 'redsm5_posts.csv'
@@ -301,8 +321,8 @@ def main(cfg: DictConfig):
             max_length=cfg.data.max_length,
         )
 
-        print(f"Train samples: {len(train_dataset)}")
-        print(f"Val samples: {len(val_dataset)}")
+        logger.info(f"Train samples: {len(train_dataset)}")
+        logger.info(f"Val samples: {len(val_dataset)}")
 
         # Create data loaders
         train_loader = DataLoader(
@@ -316,7 +336,7 @@ def main(cfg: DictConfig):
         )
 
         # Initialize model
-        print(f"\nInitializing model: {cfg.model.name}")
+        logger.info(f"Initializing model: {cfg.model.name}")
         model = GemmaClassifier(
             num_classes=NUM_CLASSES,
             model_name=cfg.model.name,
@@ -332,10 +352,10 @@ def main(cfg: DictConfig):
         class_weights = None
         if cfg.training.use_class_weights:
             class_weights = get_class_weights(train_dataset)
-            print(f"\nUsing class weights: {class_weights.numpy()}")
+            logger.info(f"Using class weights: {class_weights.numpy()}")
 
         # Train fold
-        trainer = FoldTrainer(cfg, fold_idx, run_dir, device)
+        trainer = FoldTrainer(cfg, fold_idx, run_dir, device, logger=logger)
         history, best_f1, best_epoch = trainer.train_fold(model, train_loader, val_loader, class_weights)
 
         fold_results.append({
@@ -348,23 +368,23 @@ def main(cfg: DictConfig):
             'epochs_trained': history['epochs_trained'],
         })
 
-        print(f"\nFold {fold_idx} completed. Best F1: {best_f1:.4f}")
+        logger.info(f"Fold {fold_idx} completed. Best F1: {best_f1:.4f}")
 
     # Aggregate results
-    print("\n" + "="*60)
-    print("Cross-Validation Results")
-    print("="*60)
+    logger.info("=" * 60)
+    logger.info("Cross-Validation Results")
+    logger.info("=" * 60)
 
     results_df = pd.DataFrame(fold_results)
-    print(results_df)
+    logger.info(f"\n{results_df}")
 
     # Compute statistics
     mean_f1 = results_df['best_val_f1'].mean()
     std_f1 = results_df['best_val_f1'].std()
 
-    print(f"\nMean F1: {mean_f1:.4f} ± {std_f1:.4f}")
-    print(f"Min F1: {results_df['best_val_f1'].min():.4f}")
-    print(f"Max F1: {results_df['best_val_f1'].max():.4f}")
+    logger.info(f"Mean F1: {mean_f1:.4f} ± {std_f1:.4f}")
+    logger.info(f"Min F1: {results_df['best_val_f1'].min():.4f}")
+    logger.info(f"Max F1: {results_df['best_val_f1'].max():.4f}")
 
     # Save aggregate results
     results_df.to_csv(run_dir / 'cv_results.csv', index=False)
@@ -388,8 +408,8 @@ def main(cfg: DictConfig):
     with open(run_dir / 'aggregate_results.json', 'w') as f:
         json.dump(aggregate_results, f, indent=2)
 
-    print(f"\nResults saved to: {run_dir}")
-    print("="*60)
+    logger.info(f"Results saved to: {run_dir}")
+    logger.info("=" * 60)
 
 
 if __name__ == '__main__':

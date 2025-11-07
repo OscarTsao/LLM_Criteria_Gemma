@@ -4,7 +4,10 @@ import torch
 import torch.nn as nn
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from typing import Optional, Union, Tuple
+import logging
 from .poolers import MeanPooler, CLSPooler, MaxPooler, AttentionPooler
+
+logger = logging.getLogger(__name__)
 
 
 class GemmaEncoder(nn.Module):
@@ -28,7 +31,7 @@ class GemmaEncoder(nn.Module):
         self.model_name = model_name
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
 
-        print(f"Loading {model_name}...")
+        logger.info(f"Loading {model_name}...")
         self.model = AutoModelForCausalLM.from_pretrained(
             model_name,
             torch_dtype=torch.bfloat16,
@@ -42,13 +45,13 @@ class GemmaEncoder(nn.Module):
 
         # Enable gradient checkpointing to reduce memory usage
         if use_gradient_checkpointing:
-            print("Enabling gradient checkpointing for memory efficiency...")
+            logger.info("Enabling gradient checkpointing for memory efficiency...")
             try:
                 self.model.gradient_checkpointing_enable()
                 if hasattr(self.model, 'enable_input_require_grads'):
                     self.model.enable_input_require_grads()
             except Exception as e:
-                print(f"Warning: Could not enable gradient checkpointing: {e}")
+                logger.warning(f"Could not enable gradient checkpointing: {e}")
 
         self.tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
         hidden_size = self.model.config.hidden_size
@@ -84,7 +87,7 @@ class GemmaEncoder(nn.Module):
         masking while preserving padding masks. This allows all tokens to attend
         to all other tokens in the sequence.
         """
-        print("Enabling bidirectional attention for encoder tasks...")
+        logger.info("Enabling bidirectional attention for encoder tasks...")
 
         # For Gemma models, we need to modify the attention mask preparation
         # The key is to pass None for position_ids and let the model compute
@@ -115,7 +118,7 @@ class GemmaEncoder(nn.Module):
                     # during generation. During training with attention_mask only, most
                     # implementations already support bidirectional attention.
 
-        print("Bidirectional attention enabled")
+        logger.info("Bidirectional attention enabled")
 
     def forward(
         self,

@@ -1,0 +1,27 @@
+# Experiment tracking configuration
+
+# MLflow configuration
+mlflow:
+  enabled: true
+  tracking_uri: ./mlruns  # Local storage or remote server URL
+  experiment_name: gemma_redsm5
+  artifact_location: null  # null = default location
+
+# Weights & Biases configuration
+wandb:
+  enabled: false  # Set to true to enable W&B
+  project: llm-criteria-gemma
+  entity: null  # Your W&B username or team name
+  tags:
+    - gemma
+    - redsm5
+    - mental-health
+  notes: "DSM-5 criteria matching with Gemma encoder"
+
+# Logging configuration
+logging:
+  log_metrics_every_n_steps: 10
+  log_model_checkpoints: true
+  log_config: true
+  log_code: false  # Log source code as artifact
+  log_system_metrics: true  # Log CPU/GPU usage

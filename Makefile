@@ -1,7 +1,7 @@
 # Makefile for Gemma Encoder on ReDSM5
 # Usage: make <target>
 
-.PHONY: help install test clean train train-5fold train-5fold-mentallama train-5fold-gemma train-5fold-both train-quick evaluate lint format check-gpu nli-test nli-quick nli-train nli-simple
+.PHONY: help install test clean train train-5fold train-5fold-mentallama train-5fold-gemma train-5fold-both train-quick evaluate lint format check-gpu nli-test nli-quick nli-train nli-simple nli-predict-interactive nli-predict-demo nli-predict-best
 
 # Default target
 .DEFAULT_GOAL := help
@@ -15,6 +15,9 @@ help: ## Display this help message
 
 install: ## Install dependencies
 	pip install -r requirements.txt
+
+install-viz: ## Install visualization dependencies only
+	pip install rich>=13.0.0 plotext>=5.2.0
 
 install-dev: ## Install with development dependencies
 	pip install -r requirements.txt
@@ -169,6 +172,56 @@ nli-quickstart: ## Complete NLI quick start workflow
 	@echo "✓ Quick start complete!"
 	@echo "  For full training: make nli-train"
 	@echo "  For documentation: cat README_NLI.md"
+
+##@ Inference & Prediction
+
+nli-predict-interactive: ## Interactive NLI prediction (requires CHECKPOINT)
+	@if [ -z "$(CHECKPOINT)" ]; then \
+		echo "Error: CHECKPOINT not specified"; \
+		echo "Usage: make nli-predict-interactive CHECKPOINT=path/to/model.pt"; \
+		exit 1; \
+	fi
+	python src/inference/predict_nli.py --checkpoint $(CHECKPOINT) --mode interactive
+
+nli-predict-demo: ## Run prediction demo with examples (requires CHECKPOINT)
+	@if [ -z "$(CHECKPOINT)" ]; then \
+		echo "Error: CHECKPOINT not specified"; \
+		echo "Usage: make nli-predict-demo CHECKPOINT=path/to/model.pt"; \
+		exit 1; \
+	fi
+	python src/inference/predict_nli.py --checkpoint $(CHECKPOINT) --mode demo
+
+nli-predict-batch: ## Batch prediction from file (requires CHECKPOINT, FILE, CRITERION)
+	@if [ -z "$(CHECKPOINT)" ] || [ -z "$(FILE)" ] || [ -z "$(CRITERION)" ]; then \
+		echo "Error: Missing required arguments"; \
+		echo "Usage: make nli-predict-batch CHECKPOINT=path/to/model.pt FILE=posts.txt CRITERION=DEPRESSED_MOOD"; \
+		exit 1; \
+	fi
+	python src/inference/predict_nli.py --checkpoint $(CHECKPOINT) --mode batch --post_file $(FILE) --criterion $(CRITERION)
+
+nli-predict-best: ## Interactive prediction with best model from latest run
+	@RUN_DIR=$$(for dir in $$(ls -td outputs/nli_*/ 2>/dev/null); do \
+		if [ -f "$${dir}fold_1_best.pt" ]; then echo $$dir; fi; \
+	done | head -n 1); \
+	if [ -z "$$RUN_DIR" ]; then \
+		echo "No trained NLI model found. Run 'make nli-train' first."; \
+		exit 1; \
+	fi; \
+	CHECKPOINT="$${RUN_DIR%/}/fold_1_best.pt"; \
+	echo "Using checkpoint: $$CHECKPOINT"; \
+	python src/inference/predict_nli.py --checkpoint "$$CHECKPOINT" --mode interactive
+
+nli-demo-best: ## Run prediction demo with best model from latest run
+	@RUN_DIR=$$(for dir in $$(ls -td outputs/nli_*/ 2>/dev/null); do \
+		if [ -f "$${dir}fold_1_best.pt" ]; then echo $$dir; fi; \
+	done | head -n 1); \
+	if [ -z "$$RUN_DIR" ]; then \
+		echo "No trained NLI model found. Run 'make nli-train' first."; \
+		exit 1; \
+	fi; \
+	CHECKPOINT="$${RUN_DIR%/}/fold_1_best.pt"; \
+	echo "Using checkpoint: $$CHECKPOINT"; \
+	python src/inference/predict_nli.py --checkpoint "$$CHECKPOINT" --mode demo
 
 ##@ Evaluation
 
@@ -455,6 +508,12 @@ ref: ## Quick reference card
 	@echo "  make nli-gemma-9b     NLI with Gemma-9B"
 	@echo "  make nli-imbalanced   Imbalanced data (3:1)"
 	@echo "  make nli-unfreeze     Unfreeze encoder"
+	@echo ""
+	@echo "INFERENCE:"
+	@echo "  make nli-predict-best       Interactive prediction (latest model)"
+	@echo "  make nli-demo-best          Demo with examples (latest model)"
+	@echo "  make nli-predict-interactive CHECKPOINT=path/to/model.pt"
+	@echo "  make nli-predict-demo       CHECKPOINT=path/to/model.pt"
 	@echo ""
 	@echo "EXPERIMENTS:"
 	@echo "  make nli-ablation-pooling   Pooling strategies"

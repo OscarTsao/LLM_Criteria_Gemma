@@ -1,7 +1,7 @@
 # Makefile for Gemma Encoder on ReDSM5
 # Usage: make <target>
 
-.PHONY: help install test clean train train-5fold train-5fold-mentallama train-5fold-gemma train-5fold-both train-quick evaluate lint format check-gpu check-hardware nli-test nli-quick nli-train nli-simple nli-predict-interactive nli-predict-demo nli-predict-best nli-train-4090 nli-train-3090 nli-train-low-mem nli-train-cpu nli-train-auto
+.PHONY: help install test clean train train-5fold train-5fold-mentallama train-5fold-gemma train-5fold-both train-quick evaluate lint format check-gpu check-hardware nli-test nli-quick nli-train nli-simple nli-predict-interactive nli-predict-demo nli-predict-best nli-train-4090 nli-train-3090 nli-train-low-mem nli-train-cpu nli-train-auto mlflow-ui mlflow-ui-custom mlflow-list mlflow-runs mlflow-clean mlflow-models
 
 # Default target
 .DEFAULT_GOAL := help
@@ -435,6 +435,84 @@ watch-training: ## Watch training logs in real-time
 		echo "No training log found"; \
 	fi
 
+##@ MLflow Tracking
+
+mlflow-ui: ## Launch MLflow UI
+	@if [ -d mlruns ]; then \
+		echo "Starting MLflow UI at http://localhost:5000"; \
+		mlflow ui --port 5000; \
+	else \
+		echo "No MLflow runs found. Train a model first."; \
+	fi
+
+mlflow-ui-custom: ## Launch MLflow UI on custom port (use PORT=xxxx)
+	@PORT=$${PORT:-5000}; \
+	if [ -d mlruns ]; then \
+		echo "Starting MLflow UI at http://localhost:$$PORT"; \
+		mlflow ui --port $$PORT; \
+	else \
+		echo "No MLflow runs found. Train a model first."; \
+	fi
+
+mlflow-list: ## List all MLflow experiments
+	@if [ -d mlruns ]; then \
+		python -c "import mlflow; \
+			client = mlflow.tracking.MlflowClient(); \
+			exps = client.search_experiments(); \
+			print('MLflow Experiments:'); \
+			for exp in exps: \
+				print(f'  {exp.experiment_id}: {exp.name}')"; \
+	else \
+		echo "No MLflow runs found"; \
+	fi
+
+mlflow-runs: ## Show recent MLflow runs
+	@if [ -d mlruns ]; then \
+		python -c "import mlflow; \
+			import pandas as pd; \
+			client = mlflow.tracking.MlflowClient(); \
+			exps = client.search_experiments(); \
+			for exp in exps: \
+				if exp.name != 'Default': \
+					runs = client.search_runs(exp.experiment_id, max_results=10); \
+					if runs: \
+						print(f'\n{exp.name}:'); \
+						for run in runs: \
+							metrics = run.data.metrics; \
+							f1 = metrics.get('cv_aggregate/mean_f1', metrics.get('test_f1', 'N/A')); \
+							print(f'  {run.info.run_id[:8]}... {run.info.run_name}: F1={f1}')"; \
+	else \
+		echo "No MLflow runs found"; \
+	fi
+
+mlflow-clean: ## Clean MLflow runs (BE CAREFUL!)
+	@echo "WARNING: This will delete all MLflow tracking data!"
+	@echo "Press Ctrl+C to cancel, or Enter to continue..."
+	@read confirm
+	rm -rf mlruns/
+	@echo "MLflow data cleaned"
+
+mlflow-models: ## List registered models
+	@if [ -d mlruns ]; then \
+		python -c "import mlflow; \
+			from mlflow.tracking import MlflowClient; \
+			client = MlflowClient(); \
+			try: \
+				models = client.search_registered_models(); \
+				if models: \
+					print('Registered Models:'); \
+					for model in models: \
+						print(f'  {model.name}'); \
+						for version in model.latest_versions: \
+							print(f'    v{version.version}: {version.current_stage}'); \
+				else: \
+					print('No registered models found'); \
+			except: \
+				print('Model registry not available')"; \
+	else \
+		echo "No MLflow runs found"; \
+	fi
+
 ##@ Experiments
 
 exp-pooling-comparison: ## Compare all pooling strategies
@@ -569,6 +647,12 @@ ref: ## Quick reference card
 	@echo "  make nli-ablation-pooling   Pooling strategies"
 	@echo "  make nli-ablation-negatives Negative ratios"
 	@echo "  make exp-pooling-comparison Original pooling"
+	@echo ""
+	@echo "MLFLOW TRACKING:"
+	@echo "  make mlflow-ui          Launch MLflow UI"
+	@echo "  make mlflow-list        List experiments"
+	@echo "  make mlflow-runs        Show recent runs"
+	@echo "  make mlflow-models      List registered models"
 	@echo ""
 	@echo "UTILITIES:"
 	@echo "  make clean            Clean cache files"

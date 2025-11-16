@@ -34,6 +34,7 @@ from utils.hardware_optimizer import (
     detect_gpu_info, optimize_pytorch_settings,
     print_hardware_info, compile_model
 )
+from utils.experiment_tracking import ExperimentTracker
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +51,7 @@ class NLIFoldTrainer:
         fold_num: int,
         output_dir: Path,
         device: str = 'cuda',
+        tracker: Optional['ExperimentTracker'] = None,
     ):
         self.model = model.to(device)
         self.train_loader = train_loader
@@ -58,6 +60,7 @@ class NLIFoldTrainer:
         self.fold_num = fold_num
         self.output_dir = output_dir
         self.device = device
+        self.tracker = tracker
 
         # Optimizer
         self.optimizer = torch.optim.AdamW(
@@ -230,6 +233,18 @@ class NLIFoldTrainer:
                 f"Val AUC: {val_metrics['auc']:.4f}"
             )
 
+            # Log to MLflow
+            if self.tracker:
+                self.tracker.log_metrics({
+                    f'fold_{self.fold_num}/train_loss': train_loss,
+                    f'fold_{self.fold_num}/val_loss': val_metrics['loss'],
+                    f'fold_{self.fold_num}/val_accuracy': val_metrics['accuracy'],
+                    f'fold_{self.fold_num}/val_precision': val_metrics['precision'],
+                    f'fold_{self.fold_num}/val_recall': val_metrics['recall'],
+                    f'fold_{self.fold_num}/val_f1': val_metrics['f1'],
+                    f'fold_{self.fold_num}/val_auc': val_metrics['auc'],
+                }, step=epoch)
+
             # Save best model
             if val_metrics['f1'] > self.best_val_f1:
                 self.best_val_f1 = val_metrics['f1']
@@ -319,6 +334,61 @@ def main(cfg: DictConfig):
     logger.info(f"Loading tokenizer: {cfg.model.name}")
     tokenizer = AutoTokenizer.from_pretrained(cfg.model.name, trust_remote_code=True)
 
+    # Initialize MLflow tracking
+    tracker = None
+    mlflow_enabled = cfg.get('mlflow', {}).get('enabled', True)
+
+    if mlflow_enabled:
+        try:
+            # Get hardware info for tags
+            hw_info = detect_gpu_info()
+
+            # Initialize tracker
+            tracker = ExperimentTracker(
+                experiment_name=cfg.get('mlflow', {}).get('experiment_name', 'gemma_nli_redsm5'),
+                run_name=cfg.output.experiment_name,
+                tracking_uri=cfg.get('mlflow', {}).get('tracking_uri', './mlruns'),
+                use_mlflow=True,
+                use_wandb=False,
+                config=OmegaConf.to_container(cfg, resolve=True),
+            )
+
+            # Log hardware information as tags
+            tracker.set_tags({
+                'task': 'nli_binary_classification',
+                'dataset': 'ReDSM5',
+                'num_folds': str(cfg.cv.num_folds),
+                'gpu_name': hw_info.get('gpu_name', 'cpu'),
+                'gpu_memory_gb': f"{hw_info.get('gpu_memory_gb', 0):.1f}",
+                'has_gpu': str(hw_info.get('has_gpu', False)),
+                'supports_bfloat16': str(hw_info.get('supports_bfloat16', False)),
+                'supports_tf32': str(hw_info.get('supports_tf32', False)),
+            })
+
+            # Log dataset metadata
+            metadata_path = folds_dir / 'nli_cv_folds_metadata.json'
+            if metadata_path.exists():
+                with open(metadata_path) as f:
+                    metadata = json.load(f)
+                    tracker.log_params({
+                        'dataset/total_pairs': metadata.get('total_pairs', 0),
+                        'dataset/positive_pairs': metadata.get('positive_pairs', 0),
+                        'dataset/negative_pairs': metadata.get('negative_pairs', 0),
+                        'dataset/num_criteria': metadata.get('num_criteria', 10),
+                    })
+
+            # Log configuration as artifact
+            tracker.log_artifact(str(config_path))
+
+            logger.info("✓ MLflow tracking enabled")
+
+        except Exception as e:
+            logger.warning(f"Failed to initialize MLflow tracking: {e}")
+            logger.warning("Continuing without experiment tracking")
+            tracker = None
+    else:
+        logger.info("MLflow tracking disabled")
+
     # Train each fold
     fold_results = []
 
@@ -379,6 +449,7 @@ def main(cfg: DictConfig):
             fold_num=fold_num,
             output_dir=output_dir,
             device='cuda' if cfg.device.use_cuda and torch.cuda.is_available() else 'cpu',
+            tracker=tracker,
         )
 
         fold_result = trainer.train()
@@ -388,6 +459,22 @@ def main(cfg: DictConfig):
         history_path = output_dir / f'fold_{fold_num}_history.json'
         with open(history_path, 'w') as f:
             json.dump(trainer.history, f, indent=2)
+
+        # Log fold artifacts to MLflow
+        if tracker:
+            # Log best model checkpoint
+            checkpoint_path = output_dir / f'fold_{fold_num}_best.pt'
+            if checkpoint_path.exists():
+                tracker.log_model(str(checkpoint_path), f'fold_{fold_num}_best_model')
+
+            # Log fold history
+            tracker.log_artifact(str(history_path))
+
+            # Log fold-level summary metrics
+            tracker.log_metrics({
+                f'cv_summary/fold_{fold_num}_best_f1': fold_result['best_val_f1'],
+                f'cv_summary/fold_{fold_num}_best_auc': fold_result['best_val_auc'],
+            })
 
     # Aggregate results across folds
     logger.info(f"\n{'=' * 80}")
@@ -421,6 +508,43 @@ def main(cfg: DictConfig):
     results_path = output_dir / 'aggregate_results.json'
     with open(results_path, 'w') as f:
         json.dump(aggregate_results, f, indent=2)
+
+    # Log aggregate results to MLflow
+    if tracker:
+        # Log final aggregate metrics
+        tracker.log_metrics({
+            'cv_aggregate/mean_f1': aggregate_results['mean_f1'],
+            'cv_aggregate/std_f1': aggregate_results['std_f1'],
+            'cv_aggregate/median_f1': aggregate_results['median_f1'],
+            'cv_aggregate/mean_auc': aggregate_results['mean_auc'],
+            'cv_aggregate/std_auc': aggregate_results['std_auc'],
+            'cv_aggregate/median_auc': aggregate_results['median_auc'],
+        })
+
+        # Log aggregate results file
+        tracker.log_artifact(str(results_path))
+
+        # Register best model (highest F1 fold)
+        best_fold_idx = np.argmax(f1_scores)
+        best_fold_num = best_fold_idx + 1
+        best_checkpoint = output_dir / f'fold_{best_fold_num}_best.pt'
+
+        if best_checkpoint.exists():
+            try:
+                import mlflow
+                # Log the best model to model registry
+                mlflow.pytorch.log_model(
+                    pytorch_model=None,  # We already logged the checkpoint
+                    artifact_path=f"best_model_fold_{best_fold_num}",
+                    registered_model_name=f"gemma_nli_{cfg.output.experiment_name}",
+                )
+                logger.info(f"✓ Registered best model (Fold {best_fold_num}, F1={f1_scores[best_fold_idx]:.4f}) to MLflow Model Registry")
+            except Exception as e:
+                logger.warning(f"Failed to register model: {e}")
+
+        # Finish tracking
+        tracker.finish()
+        logger.info("✓ MLflow tracking completed")
 
     logger.info(f"\nResults saved to: {output_dir}")
     logger.info("Training complete!")

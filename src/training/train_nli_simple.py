@@ -27,6 +27,7 @@ from utils.hardware_optimizer import (
     detect_gpu_info, optimize_pytorch_settings,
     print_hardware_info, compile_model
 )
+from utils.experiment_tracking import ExperimentTracker
 
 
 def train_epoch(model, dataloader, optimizer, scheduler, criterion, device, use_amp=True):
@@ -127,6 +128,7 @@ def main():
     parser.add_argument('--negative_ratio', type=float, default=1.0, help='Negative to positive ratio')
     parser.add_argument('--use_short_criteria', action='store_true', help='Use short criteria')
     parser.add_argument('--freeze_encoder', action='store_true', help='Freeze encoder weights')
+    parser.add_argument('--mlflow', action='store_true', help='Enable MLflow tracking')
 
     args = parser.parse_args()
 
@@ -188,6 +190,33 @@ def main():
     criterion = nn.CrossEntropyLoss(weight=class_weights)
     print(f"Class weights: {class_weights.cpu().numpy()}")
 
+    # Initialize MLflow tracking
+    tracker = None
+    if args.mlflow:
+        try:
+            hw_info = detect_gpu_info()
+            tracker = ExperimentTracker(
+                experiment_name='gemma_nli_simple',
+                run_name=f"simple_{args.model_name.split('/')[-1]}",
+                tracking_uri='./mlruns',
+                use_mlflow=True,
+                use_wandb=False,
+                config=vars(args),
+            )
+
+            # Set tags
+            tracker.set_tags({
+                'task': 'nli_binary_simple',
+                'dataset': 'ReDSM5',
+                'gpu_name': hw_info.get('gpu_name', 'cpu'),
+                'training_mode': 'simple_split',
+            })
+
+            print("✓ MLflow tracking enabled")
+        except Exception as e:
+            print(f"Warning: Failed to initialize MLflow: {e}")
+            tracker = None
+
     # Training loop
     best_val_f1 = 0.0
     history = {'train_loss': [], 'val_metrics': []}
@@ -205,6 +234,18 @@ def main():
         print(f"Train Loss: {train_loss:.4f}")
         print(f"Val - Loss: {val_metrics['loss']:.4f}, Acc: {val_metrics['accuracy']:.4f}, "
               f"F1: {val_metrics['f1']:.4f}, AUC: {val_metrics['auc']:.4f}")
+
+        # Log to MLflow
+        if tracker:
+            tracker.log_metrics({
+                'train_loss': train_loss,
+                'val_loss': val_metrics['loss'],
+                'val_accuracy': val_metrics['accuracy'],
+                'val_precision': val_metrics['precision'],
+                'val_recall': val_metrics['recall'],
+                'val_f1': val_metrics['f1'],
+                'val_auc': val_metrics['auc'],
+            }, step=epoch)
 
         # Save best model
         if val_metrics['f1'] > best_val_f1:
@@ -251,6 +292,27 @@ def main():
 
     with open(output_dir / 'history.json', 'w') as f:
         json.dump(history, f, indent=2)
+
+    # Log final results to MLflow
+    if tracker:
+        # Log test metrics
+        tracker.log_metrics({
+            'test_accuracy': test_metrics['accuracy'],
+            'test_precision': test_metrics['precision'],
+            'test_recall': test_metrics['recall'],
+            'test_f1': test_metrics['f1'],
+            'test_auc': test_metrics['auc'],
+            'best_val_f1': best_val_f1,
+        })
+
+        # Log artifacts
+        tracker.log_artifact(str(output_dir / 'results.json'))
+        tracker.log_artifact(str(output_dir / 'history.json'))
+        tracker.log_model(str(output_dir / 'best_model.pt'), 'best_model')
+
+        # Finish tracking
+        tracker.finish()
+        print("✓ MLflow tracking completed")
 
     print(f"\nResults saved to: {output_dir}")
     print("Training complete!")

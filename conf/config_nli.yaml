@@ -56,6 +56,23 @@ logging:
 device:
   use_cuda: true
   mixed_precision: true  # Use bfloat16
+  cudnn_benchmark: true
+  cudnn_deterministic: false
+  tf32: true  # Enable TF32 for Ampere GPUs
+
+# Optimization configuration
+optimization:
+  gradient_accumulation_steps: 1
+  max_grad_norm: 1.0
+  compile: false  # torch.compile (PyTorch 2.0+)
+  compile_mode: default  # Options: default, reduce-overhead, max-autotune
+
+# MLflow tracking configuration
+mlflow:
+  enabled: true
+  tracking_uri: ./mlruns
+  experiment_name: gemma_nli_redsm5
+  artifact_location: null
 
 # Task-specific notes:
 # This configuration is for NLI-style binary criteria matching:

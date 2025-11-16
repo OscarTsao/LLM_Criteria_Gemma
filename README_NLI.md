@@ -205,6 +205,52 @@ python src/training/train_nli_5fold.py \
 
 **See [HARDWARE_OPTIMIZATION.md](HARDWARE_OPTIMIZATION.md) for complete guide.**
 
+## MLflow Experiment Tracking
+
+Full MLflow tracking is integrated for comprehensive experiment management:
+
+### Quick Start
+
+```bash
+# Training with MLflow (enabled by default)
+make nli-train
+
+# View results in MLflow UI
+make mlflow-ui
+```
+
+Then open http://localhost:5000 to visualize and compare experiments.
+
+### What Gets Tracked
+
+**Automatically logged:**
+- ✅ All hyperparameters (batch_size, learning_rate, etc.)
+- ✅ Hardware information (GPU, memory, capabilities)
+- ✅ Dataset metadata (pairs, criteria, splits)
+- ✅ Training metrics per epoch (loss, F1, AUC, etc.)
+- ✅ Per-fold results (for 5-fold CV)
+- ✅ Aggregate cross-validation metrics
+- ✅ Model checkpoints and artifacts
+- ✅ Configuration files
+
+### MLflow Commands
+
+```bash
+make mlflow-ui          # Launch MLflow UI
+make mlflow-list        # List all experiments
+make mlflow-runs        # Show recent runs
+make mlflow-models      # List registered models
+```
+
+### Model Registry
+
+Best models are automatically registered to MLflow Model Registry:
+- Model versioning
+- Stage management (staging/production)
+- Model lineage tracking
+
+**See [MLFLOW_TRACKING.md](MLFLOW_TRACKING.md) for complete guide.**
+
 ## DSM-5 Criteria Descriptions
 
 The repository includes two versions of DSM-5 criterion texts:

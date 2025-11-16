@@ -1,0 +1,19 @@
+# @package _global_
+
+# Quick test configuration for NLI binary classification
+# Fast iteration for testing the pipeline
+
+training:
+  num_epochs: 3
+  batch_size: 16
+  early_stopping_patience: 5
+
+cv:
+  num_folds: 2  # Only 2 folds for quick testing
+
+data:
+  negative_ratio: 1.0
+  use_short_criteria: true  # Use short criteria for faster tokenization
+
+output:
+  experiment_name: nli_quick_test

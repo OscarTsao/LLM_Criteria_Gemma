@@ -1,0 +1,19 @@
+# @package _global_
+
+# Imbalanced dataset experiment (more negatives than positives)
+# Tests model performance with realistic class imbalance
+
+training:
+  num_epochs: 25
+  batch_size: 8
+  use_class_weights: true  # Important for imbalanced data
+
+cv:
+  num_folds: 5
+
+data:
+  negative_ratio: 3.0  # 3x more negative samples than positive
+  use_short_criteria: false
+
+output:
+  experiment_name: nli_imbalanced_3to1

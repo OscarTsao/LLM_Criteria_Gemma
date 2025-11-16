@@ -1,0 +1,19 @@
+# @package _global_
+
+# Full 5-fold CV configuration for NLI binary classification
+# Production training with full criterion descriptions
+
+training:
+  num_epochs: 30
+  batch_size: 8
+  early_stopping_patience: 15
+
+cv:
+  num_folds: 5
+
+data:
+  negative_ratio: 1.0  # Balanced dataset
+  use_short_criteria: false  # Use full criterion descriptions
+
+output:
+  experiment_name: nli_full_5fold

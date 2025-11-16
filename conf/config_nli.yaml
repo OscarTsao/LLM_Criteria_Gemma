@@ -1,0 +1,65 @@
+# Hydra configuration for NLI-style Binary Criteria Matching
+# Binary classification: [CLS] post [SEP] criterion [SEP] -> matched/unmatched
+
+defaults:
+  - _self_
+  - experiment: null
+
+# Model configuration
+model:
+  name: google/gemma-2-2b  # Use smaller model for NLI task
+  pooling_strategy: mean  # Options: mean, cls, max, first_k, last_k, attention
+  freeze_encoder: true  # Freeze encoder, only train classifier head
+  hidden_dropout_prob: 0.1
+  classifier_hidden_size: null  # null = simple linear, or specify size like 768
+  use_gradient_checkpointing: true  # Enable to reduce memory usage
+
+# Training configuration
+training:
+  num_epochs: 20  # Binary classification typically converges faster
+  batch_size: 8  # Can use larger batch size with frozen encoder
+  learning_rate: 2e-5
+  weight_decay: 0.01
+  warmup_ratio: 0.1
+  max_grad_norm: 1.0
+  use_class_weights: true  # Balance matched/unmatched classes
+  early_stopping_patience: 10  # Stop if F1 does not improve for 10 epochs
+
+# Data configuration
+data:
+  data_dir: /media/cvrlab308/cvrlab308_4090/YuNing/LLM_Criteria_Gemma/data/redsm5
+  max_length: 512  # Accommodate post + criterion pairs
+  negative_ratio: 1.0  # 1.0 = balanced dataset (equal positive/negative samples)
+  use_short_criteria: false  # false = use full criterion descriptions
+  random_seed: 42
+
+# Cross-validation configuration
+cv:
+  enabled: true
+  num_folds: 5
+  stratified: true
+  save_fold_results: true
+
+# Output configuration
+output:
+  base_dir: outputs
+  experiment_name: nli_binary_5fold
+  save_best_only: true
+  save_predictions: true
+
+# Logging
+logging:
+  log_interval: 10  # steps
+  eval_interval: 1  # epochs
+
+# Device configuration
+device:
+  use_cuda: true
+  mixed_precision: true  # Use bfloat16
+
+# Task-specific notes:
+# This configuration is for NLI-style binary criteria matching:
+# - Input: (Reddit post, DSM-5 criterion description) pairs
+# - Output: Binary label (0=unmatched, 1=matched)
+# - 5-fold stratified cross-validation
+# - Balanced positive/negative samples (negative_ratio=1.0)

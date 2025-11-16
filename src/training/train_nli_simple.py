@@ -23,6 +23,10 @@ sys.path.append(str(Path(__file__).parent.parent))
 
 from models.gemma_encoder import GemmaClassifier
 from data.redsm5_nli_dataset import load_redsm5_nli, get_class_weights, NUM_CLASSES
+from utils.hardware_optimizer import (
+    detect_gpu_info, optimize_pytorch_settings,
+    print_hardware_info, compile_model
+)
 
 
 def train_epoch(model, dataloader, optimizer, scheduler, criterion, device, use_amp=True):
@@ -125,6 +129,10 @@ def main():
     parser.add_argument('--freeze_encoder', action='store_true', help='Freeze encoder weights')
 
     args = parser.parse_args()
+
+    # Print hardware information and optimize PyTorch settings
+    print_hardware_info()
+    optimize_pytorch_settings()
 
     # Setup
     device = 'cuda' if torch.cuda.is_available() else 'cpu'

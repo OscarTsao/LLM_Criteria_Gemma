@@ -1,0 +1,25 @@
+# @package _global_
+
+# Optimized configuration for GPUs with 8-12GB VRAM (RTX 3060, 2080 Ti, etc.)
+
+model:
+  use_gradient_checkpointing: true  # Essential for memory savings
+  freeze_encoder: true  # Must freeze to fit in memory
+
+training:
+  batch_size: 4  # Conservative for low memory
+  num_workers: 4
+  pin_memory: true
+  prefetch_factor: 2
+
+device:
+  use_cuda: true
+  mixed_precision: true  # Critical for memory reduction
+  cudnn_benchmark: true
+  cudnn_deterministic: false
+  tf32: true
+
+optimization:
+  gradient_accumulation_steps: 4  # Simulate batch_size=16
+  max_grad_norm: 1.0
+  compile: false

@@ -147,6 +147,64 @@ cv:
   num_folds: 5
 ```
 
+## Hardware Optimization
+
+The repository includes automatic hardware detection and optimization for different GPU configurations:
+
+### Quick Start
+
+```bash
+# Check your hardware and get recommendations
+make check-hardware
+
+# Automatic hardware detection
+make nli-train-auto
+
+# Or use a specific GPU profile:
+make nli-train-4090      # RTX 4090 (24GB)
+make nli-train-3090      # RTX 3090 (24GB)
+make nli-train-low-mem   # Low-memory GPUs (8-12GB)
+```
+
+### Hardware-Specific Configurations
+
+**RTX 4090 / A6000 (24GB VRAM)**
+- Batch size: 16
+- Gradient checkpointing: Disabled
+- Compile: Enabled (torch.compile)
+- Expected: ~15-20 samples/sec
+
+**RTX 3090 (24GB VRAM)**
+- Batch size: 12
+- Gradient checkpointing: Disabled
+- Expected: ~12-18 samples/sec
+
+**Low-Memory GPUs (8-12GB VRAM)**
+- Batch size: 4
+- Gradient checkpointing: Enabled
+- Gradient accumulation: 4 steps (effective batch size: 16)
+- Expected: ~6-10 samples/sec
+
+### Automatic Optimizations
+
+The hardware optimizer automatically applies:
+- ✅ **Mixed precision (bfloat16)** - 2x faster training
+- ✅ **TF32 on Ampere GPUs** - Up to 8x faster matmul
+- ✅ **cuDNN benchmark mode** - Auto-tunes algorithms
+- ✅ **Optimal DataLoader workers** - Based on GPU memory
+- ✅ **Model compilation** - 10-30% speedup (PyTorch 2.0+)
+
+### Manual Override
+
+```bash
+python src/training/train_nli_5fold.py \
+    hardware=gpu_4090 \
+    training.batch_size=20 \
+    optimization.compile=true
+```
+
+**See [HARDWARE_OPTIMIZATION.md](HARDWARE_OPTIMIZATION.md) for complete guide.**
+
 ## DSM-5 Criteria Descriptions
 
 The repository includes two versions of DSM-5 criterion texts:

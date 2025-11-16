@@ -1,7 +1,7 @@
 # Makefile for Gemma Encoder on ReDSM5
 # Usage: make <target>
 
-.PHONY: help install test clean train train-5fold train-5fold-mentallama train-5fold-gemma train-5fold-both train-quick evaluate lint format check-gpu nli-test nli-quick nli-train nli-simple nli-predict-interactive nli-predict-demo nli-predict-best
+.PHONY: help install test clean train train-5fold train-5fold-mentallama train-5fold-gemma train-5fold-both train-quick evaluate lint format check-gpu check-hardware nli-test nli-quick nli-train nli-simple nli-predict-interactive nli-predict-demo nli-predict-best nli-train-4090 nli-train-3090 nli-train-low-mem nli-train-cpu nli-train-auto
 
 # Default target
 .DEFAULT_GOAL := help
@@ -361,6 +361,49 @@ check-env: ## Check Python environment
 	@echo "\nInstalled packages:"
 	@pip list | grep -E "(torch|transformers|hydra|pandas|numpy|scikit-learn)" || echo "Key packages not found"
 
+check-hardware: ## Detailed hardware information with recommendations
+	python -c "from src.utils.hardware_optimizer import print_hardware_info; print_hardware_info()"
+
+##@ Hardware-Optimized Training
+
+nli-train-4090: ## NLI training optimized for RTX 4090 (24GB)
+	python src/training/train_nli_5fold.py \
+		hardware=gpu_4090 \
+		output.experiment_name=nli_4090_optimized
+
+nli-train-3090: ## NLI training optimized for RTX 3090 (24GB)
+	python src/training/train_nli_5fold.py \
+		hardware=gpu_3090 \
+		output.experiment_name=nli_3090_optimized
+
+nli-train-low-mem: ## NLI training for low-memory GPUs (8-12GB)
+	python src/training/train_nli_5fold.py \
+		hardware=gpu_low_mem \
+		output.experiment_name=nli_low_mem
+
+nli-train-cpu: ## NLI training on CPU (very slow, not recommended)
+	python src/training/train_nli_5fold.py \
+		hardware=cpu \
+		output.experiment_name=nli_cpu
+
+nli-train-auto: ## NLI training with automatic hardware detection
+	@echo "Detecting hardware and applying optimal settings..."
+	@python -c "from src.utils.hardware_optimizer import detect_gpu_info, get_recommended_config; \
+		info = detect_gpu_info(); \
+		config = get_recommended_config(); \
+		if not info['has_gpu']: \
+			print('WARNING: No GPU detected. Training on CPU will be very slow.'); \
+			print('Use: make nli-train-cpu'); \
+		elif info['gpu_memory_gb'] >= 22: \
+			print(f\"Detected high-end GPU: {info['gpu_name']} ({info['gpu_memory_gb']:.1f}GB)\"); \
+			print('Recommended: make nli-train-4090'); \
+		elif info['gpu_memory_gb'] >= 18: \
+			print(f\"Detected mid-high GPU: {info['gpu_name']} ({info['gpu_memory_gb']:.1f}GB)\"); \
+			print('Recommended: make nli-train-3090'); \
+		else: \
+			print(f\"Detected low-memory GPU: {info['gpu_name']} ({info['gpu_memory_gb']:.1f}GB)\"); \
+			print('Recommended: make nli-train-low-mem')"
+
 ##@ Documentation
 
 docs: ## Open documentation in browser
@@ -508,6 +551,13 @@ ref: ## Quick reference card
 	@echo "  make nli-gemma-9b     NLI with Gemma-9B"
 	@echo "  make nli-imbalanced   Imbalanced data (3:1)"
 	@echo "  make nli-unfreeze     Unfreeze encoder"
+	@echo ""
+	@echo "HARDWARE-OPTIMIZED:"
+	@echo "  make check-hardware   Show hardware info & recommendations"
+	@echo "  make nli-train-auto   Auto-detect optimal settings"
+	@echo "  make nli-train-4090   RTX 4090 optimized (24GB)"
+	@echo "  make nli-train-3090   RTX 3090 optimized (24GB)"
+	@echo "  make nli-train-low-mem Low-memory GPUs (8-12GB)"
 	@echo ""
 	@echo "INFERENCE:"
 	@echo "  make nli-predict-best       Interactive prediction (latest model)"

@@ -30,6 +30,10 @@ sys.path.append(str(Path(__file__).parent.parent))
 from models.gemma_encoder import GemmaClassifier
 from data.nli_cv_splits import create_nli_cv_splits, load_nli_fold_split, get_nli_fold_metadata
 from data.redsm5_nli_dataset import get_class_weights, NUM_CLASSES
+from utils.hardware_optimizer import (
+    detect_gpu_info, optimize_pytorch_settings,
+    print_hardware_info, compile_model
+)
 
 logger = logging.getLogger(__name__)
 
@@ -276,6 +280,10 @@ def main(cfg: DictConfig):
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
 
+    # Print hardware information and optimize PyTorch settings
+    print_hardware_info()
+    optimize_pytorch_settings(OmegaConf.to_container(cfg, resolve=True))
+
     logger.info("Configuration:")
     logger.info(OmegaConf.to_yaml(cfg))
 
@@ -332,15 +340,17 @@ def main(cfg: DictConfig):
             train_dataset,
             batch_size=cfg.training.batch_size,
             shuffle=True,
-            num_workers=4,
-            pin_memory=True,
+            num_workers=cfg.training.get('num_workers', 4),
+            pin_memory=cfg.training.get('pin_memory', True),
+            prefetch_factor=cfg.training.get('prefetch_factor', 2),
         )
         val_loader = DataLoader(
             val_dataset,
             batch_size=cfg.training.batch_size * 2,
             shuffle=False,
-            num_workers=4,
-            pin_memory=True,
+            num_workers=cfg.training.get('num_workers', 4),
+            pin_memory=cfg.training.get('pin_memory', True),
+            prefetch_factor=cfg.training.get('prefetch_factor', 2),
         )
 
         # Create model (fresh model for each fold)
@@ -354,6 +364,11 @@ def main(cfg: DictConfig):
             classifier_hidden_size=cfg.model.classifier_hidden_size,
             use_gradient_checkpointing=cfg.model.use_gradient_checkpointing,
         )
+
+        # Compile model if enabled (PyTorch 2.0+)
+        if cfg.optimization.get('compile', False):
+            compile_mode = cfg.optimization.get('compile_mode', 'default')
+            model = compile_model(model, mode=compile_mode)
 
         # Train fold
         trainer = NLIFoldTrainer(

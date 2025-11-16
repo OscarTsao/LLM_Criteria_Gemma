@@ -1,0 +1,24 @@
+# @package _global_
+
+# Optimized configuration for NVIDIA RTX 3090 (24GB VRAM)
+
+model:
+  use_gradient_checkpointing: false  # 24GB is sufficient
+
+training:
+  batch_size: 12  # Slightly conservative for 3090
+  num_workers: 6
+  pin_memory: true
+  prefetch_factor: 2
+
+device:
+  use_cuda: true
+  mixed_precision: true
+  cudnn_benchmark: true
+  cudnn_deterministic: false
+  tf32: true  # Ampere architecture
+
+optimization:
+  gradient_accumulation_steps: 1
+  max_grad_norm: 1.0
+  compile: false  # May have issues on older drivers

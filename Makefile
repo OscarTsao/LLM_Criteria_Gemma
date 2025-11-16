@@ -1,7 +1,7 @@
 # Makefile for Gemma Encoder on ReDSM5
 # Usage: make <target>
 
-.PHONY: help install test clean train train-5fold train-5fold-mentallama train-5fold-gemma train-5fold-both train-quick evaluate lint format check-gpu
+.PHONY: help install test clean train train-5fold train-5fold-mentallama train-5fold-gemma train-5fold-both train-quick evaluate lint format check-gpu nli-test nli-quick nli-train nli-simple
 
 # Default target
 .DEFAULT_GOAL := help
@@ -48,6 +48,127 @@ train-attention: ## Train with attention pooling
 
 train-10fold: ## Train with 10-fold CV
 	python src/training/train_gemma_hydra.py cv.num_folds=10
+
+##@ NLI Binary Classification
+
+nli-test: ## Test NLI dataset creation and text-pair formatting
+	python scripts/test_nli_dataset.py
+
+nli-quick: ## Quick NLI test (2 folds, 3 epochs)
+	python src/training/train_nli_5fold.py experiment=nli_quick_test
+
+nli-train: ## Full NLI 5-fold CV training (production)
+	python src/training/train_nli_5fold.py experiment=nli_full_5fold
+
+nli-imbalanced: ## NLI with imbalanced data (3:1 negative:positive)
+	python src/training/train_nli_5fold.py experiment=nli_imbalanced
+
+nli-simple: ## Simple NLI training (single split, no CV)
+	python src/training/train_nli_simple.py \
+		--data_dir data/redsm5 \
+		--model_name google/gemma-2-2b \
+		--batch_size 8 \
+		--epochs 10 \
+		--output_dir outputs/nli_simple \
+		--freeze_encoder
+
+nli-gemma-2b: ## NLI 5-fold CV with Gemma-2B
+	python src/training/train_nli_5fold.py \
+		model.name=google/gemma-2-2b \
+		training.batch_size=8 \
+		output.experiment_name=nli_gemma2b_5fold
+
+nli-gemma-9b: ## NLI 5-fold CV with Gemma-9B
+	python src/training/train_nli_5fold.py \
+		model.name=google/gemma-2-9b \
+		training.batch_size=4 \
+		output.experiment_name=nli_gemma9b_5fold
+
+nli-short-criteria: ## NLI with short criterion descriptions
+	python src/training/train_nli_5fold.py \
+		data.use_short_criteria=true \
+		output.experiment_name=nli_short_criteria
+
+nli-full-criteria: ## NLI with full criterion descriptions
+	python src/training/train_nli_5fold.py \
+		data.use_short_criteria=false \
+		output.experiment_name=nli_full_criteria
+
+nli-unfreeze: ## NLI with unfrozen encoder (full fine-tuning)
+	python src/training/train_nli_5fold.py \
+		model.freeze_encoder=false \
+		training.batch_size=2 \
+		training.num_epochs=10 \
+		output.experiment_name=nli_unfrozen
+
+nli-pooling-mean: ## NLI with mean pooling
+	python src/training/train_nli_5fold.py \
+		model.pooling_strategy=mean \
+		output.experiment_name=nli_pooling_mean
+
+nli-pooling-attention: ## NLI with attention pooling
+	python src/training/train_nli_5fold.py \
+		model.pooling_strategy=attention \
+		output.experiment_name=nli_pooling_attention
+
+nli-ablation-pooling: ## NLI pooling strategy ablation study
+	@echo "Running pooling ablation study for NLI..."
+	@for pooler in mean cls max attention; do \
+		echo "Training NLI with $$pooler pooling..."; \
+		python src/training/train_nli_5fold.py \
+			model.pooling_strategy=$$pooler \
+			output.experiment_name=nli_ablation_$$pooler \
+			experiment=nli_quick_test; \
+	done
+	@echo "NLI pooling ablation complete. Check outputs/nli_ablation_*/"
+
+nli-ablation-negatives: ## NLI negative ratio ablation study
+	@echo "Running negative ratio ablation study..."
+	@for ratio in 0.5 1.0 2.0 3.0; do \
+		echo "Training NLI with negative_ratio=$$ratio..."; \
+		python src/training/train_nli_5fold.py \
+			data.negative_ratio=$$ratio \
+			output.experiment_name=nli_neg_$$ratio \
+			experiment=nli_quick_test; \
+	done
+	@echo "Negative ratio ablation complete. Check outputs/nli_neg_*/"
+
+nli-show-results: ## Show NLI aggregate results from latest run
+	@python -c "import json; \
+		from pathlib import Path; \
+		import glob; \
+		results_files = sorted(glob.glob('outputs/nli_*/aggregate_results.json')); \
+		if results_files: \
+			latest = results_files[-1]; \
+			print(f'Latest NLI results: {latest}'); \
+			with open(latest) as f: \
+				r = json.load(f); \
+				print(f'\n5-Fold CV Results:'); \
+				print(f'  Mean F1:  {r[\"mean_f1\"]:.4f} ± {r[\"std_f1\"]:.4f}'); \
+				print(f'  Mean AUC: {r[\"mean_auc\"]:.4f} ± {r[\"std_auc\"]:.4f}'); \
+				print(f'\nPer-Fold Results:'); \
+				for fold in r['fold_results']: \
+					print(f'  Fold {fold[\"fold\"]}: F1={fold[\"best_val_f1\"]:.4f}, AUC={fold[\"best_val_auc\"]:.4f}'); \
+		else: \
+			print('No NLI results found. Run make nli-train first.')"
+
+nli-quickstart: ## Complete NLI quick start workflow
+	@echo "═══════════════════════════════════════"
+	@echo "NLI Binary Classification Quick Start"
+	@echo "═══════════════════════════════════════"
+	@echo ""
+	@echo "Step 1: Testing NLI dataset creation..."
+	@$(MAKE) nli-test
+	@echo ""
+	@echo "Step 2: Running quick training (2 folds, 3 epochs)..."
+	@$(MAKE) nli-quick
+	@echo ""
+	@echo "Step 3: Showing results..."
+	@$(MAKE) nli-show-results
+	@echo ""
+	@echo "✓ Quick start complete!"
+	@echo "  For full training: make nli-train"
+	@echo "  For documentation: cat README_NLI.md"
 
 ##@ Evaluation
 
@@ -264,16 +385,86 @@ info: ## Show project information
 	@echo "  • Bidirectional attention (decoder → encoder)"
 	@echo "  • 6 pooling strategies (mean, cls, max, attention, etc.)"
 	@echo "  • 5-fold cross-validation with Hydra"
-	@echo "  • Expected F1: 0.72-0.75"
+	@echo "  • Two task modes: Multi-class & NLI Binary"
 	@echo ""
-	@echo "Quick Start:"
+	@echo "Task 1: Original Multi-Class Classification"
+	@echo "  Input:  Single text (post)"
+	@echo "  Output: Symptom class (0-9)"
+	@echo "  F1:     0.72-0.75"
+	@echo ""
+	@echo "Task 2: NLI Binary Criteria Matching (NEW)"
+	@echo "  Input:  [CLS] post [SEP] criterion [SEP]"
+	@echo "  Output: Binary (matched/unmatched)"
+	@echo "  F1:     0.70-0.80"
+	@echo ""
+	@echo "Quick Start - Original Task:"
 	@echo "  make install          # Install dependencies"
 	@echo "  make train-quick      # Quick test (30 min)"
 	@echo "  make train-5fold      # Full 5-fold CV (2-3 hours)"
 	@echo ""
-	@echo "For more info: make help"
+	@echo "Quick Start - NLI Task:"
+	@echo "  make nli-quickstart   # Complete NLI workflow"
+	@echo "  make nli-quick        # Quick NLI test"
+	@echo "  make nli-train        # Full NLI 5-fold CV"
+	@echo ""
+	@echo "Documentation:"
+	@echo "  README.md             # Original task"
+	@echo "  README_NLI.md         # NLI task"
+	@echo "  make help             # All commands"
 
 version: ## Show version information
 	@echo "Project: Gemma Encoder for ReDSM5"
 	@echo "Version: 0.1.0"
 	@grep -E "^__version__" src/__init__.py 2>/dev/null || echo "Version: Not set"
+
+##@ NLI Documentation
+
+nli-docs: ## Show NLI documentation
+	@cat README_NLI.md
+
+nli-summary: ## Show NLI refactoring summary
+	@cat REFACTORING_SUMMARY.md
+
+##@ Quick Reference
+
+.PHONY: ref
+ref: ## Quick reference card
+	@echo "═══════════════════════════════════════════════════════════"
+	@echo "  GEMMA ENCODER - QUICK REFERENCE"
+	@echo "═══════════════════════════════════════════════════════════"
+	@echo ""
+	@echo "SETUP:"
+	@echo "  make install          Install dependencies"
+	@echo "  make check-data       Verify dataset files"
+	@echo "  make check-gpu        Check GPU availability"
+	@echo ""
+	@echo "ORIGINAL TASK (Multi-class):"
+	@echo "  make train-quick      Quick test (2 folds)"
+	@echo "  make train-5fold      Full 5-fold CV"
+	@echo "  make show-results     Show latest results"
+	@echo ""
+	@echo "NLI TASK (Binary):"
+	@echo "  make nli-test         Test NLI dataset"
+	@echo "  make nli-quick        Quick NLI (2 folds)"
+	@echo "  make nli-train        Full NLI 5-fold CV"
+	@echo "  make nli-show-results Show NLI results"
+	@echo "  make nli-quickstart   Complete NLI workflow"
+	@echo ""
+	@echo "NLI VARIATIONS:"
+	@echo "  make nli-gemma-2b     NLI with Gemma-2B"
+	@echo "  make nli-gemma-9b     NLI with Gemma-9B"
+	@echo "  make nli-imbalanced   Imbalanced data (3:1)"
+	@echo "  make nli-unfreeze     Unfreeze encoder"
+	@echo ""
+	@echo "EXPERIMENTS:"
+	@echo "  make nli-ablation-pooling   Pooling strategies"
+	@echo "  make nli-ablation-negatives Negative ratios"
+	@echo "  make exp-pooling-comparison Original pooling"
+	@echo ""
+	@echo "UTILITIES:"
+	@echo "  make clean            Clean cache files"
+	@echo "  make test             Run tests"
+	@echo "  make format           Format code"
+	@echo "  make info             Project info"
+	@echo "  make help             All commands"
+	@echo "═══════════════════════════════════════════════════════════"

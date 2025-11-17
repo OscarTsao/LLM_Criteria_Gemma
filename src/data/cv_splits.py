@@ -4,14 +4,16 @@ Cross-validation split utilities for ReDSM5 dataset.
 Provides functions for creating stratified K-fold splits and loading fold data.
 """
 
-import pandas as pd
-import numpy as np
-from sklearn.model_selection import StratifiedKFold
-from pathlib import Path
-from typing import List, Dict, Optional, Tuple
 import json
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple
 
-from .redsm5_dataset import ReDSM5Dataset, SYMPTOM_LABELS, NUM_CLASSES
+import numpy as np
+import pandas as pd
+from sklearn.model_selection import StratifiedKFold
+
+from .annotations_utils import ensure_symptom_label_column
+from .redsm5_dataset import NUM_CLASSES, SYMPTOM_LABELS, ReDSM5Dataset
 
 
 def create_cv_splits(
@@ -34,6 +36,7 @@ def create_cv_splits(
     """
     # Load annotations
     annotations_df = pd.read_csv(annotations_path)
+    annotations_df = ensure_symptom_label_column(annotations_df)
 
     # Convert symptom labels to indices
     symptom_to_idx = {label: idx for idx, label in enumerate(SYMPTOM_LABELS)}
@@ -126,6 +129,8 @@ def load_fold_split(
     # Load fold annotations
     train_df = pd.read_csv(data_path / f'fold_{fold_idx}_train.csv')
     val_df = pd.read_csv(data_path / f'fold_{fold_idx}_val.csv')
+    train_df = ensure_symptom_label_column(train_df)
+    val_df = ensure_symptom_label_column(val_df)
 
     # If posts_path provided, merge with post texts
     if posts_path:

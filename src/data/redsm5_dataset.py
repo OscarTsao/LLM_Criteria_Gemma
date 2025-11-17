@@ -5,13 +5,15 @@ Loads and processes the ReDSM5 (Reddit DSM-5) dataset for depression symptom cla
 Dataset contains Reddit posts annotated for 9 DSM-5 depression symptoms plus a special case.
 """
 
+import numpy as np
 import pandas as pd
 import torch
-from torch.utils.data import Dataset
-from sklearn.model_selection import train_test_split
-from typing import Optional, Tuple, List
 from pathlib import Path
-import numpy as np
+from sklearn.model_selection import train_test_split
+from torch.utils.data import Dataset
+from typing import List, Optional, Tuple
+
+from .annotations_utils import ensure_symptom_label_column
 
 
 # 10 classes total: 9 DSM-5 symptoms + 1 special case
@@ -106,6 +108,7 @@ def load_redsm5(
     # Load posts and annotations
     posts_df = pd.read_csv(data_path / 'redsm5_posts.csv')
     annotations_df = pd.read_csv(data_path / 'redsm5_annotations.csv')
+    annotations_df = ensure_symptom_label_column(annotations_df)
 
     # Merge posts with annotations
     # Assuming annotations_df has columns: post_id, symptom_label

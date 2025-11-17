@@ -49,8 +49,9 @@ class FoldTrainer:
         self.logger = logger
 
         # Initialize AMP scaler for mixed precision training
+        # Note: GradScaler is not needed with bfloat16 (better stability than float16)
         self.use_amp = cfg.device.mixed_precision
-        self.scaler = GradScaler() if self.use_amp else None
+        self.scaler = None  # Don't use GradScaler with bfloat16
 
         # Output directory for this fold
         self.fold_dir = run_dir / f'fold_{fold_idx}'
@@ -75,15 +76,13 @@ class FoldTrainer:
                     outputs = model(input_ids, attention_mask)
                     loss = criterion(outputs, labels)
 
-                # Scaled backward pass
-                self.scaler.scale(loss).backward()
-                self.scaler.unscale_(optimizer)
+                # Backward pass (no scaler needed for bfloat16)
+                loss.backward()
                 torch.nn.utils.clip_grad_norm_(
                     model.parameters(),
                     self.cfg.training.max_grad_norm
                 )
-                self.scaler.step(optimizer)
-                self.scaler.update()
+                optimizer.step()
             else:
                 outputs = model(input_ids, attention_mask)
                 loss = criterion(outputs, labels)

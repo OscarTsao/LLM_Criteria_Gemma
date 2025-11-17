@@ -6,6 +6,7 @@ from transformers import AutoTokenizer, AutoModelForCausalLM
 from typing import Optional, Union, Tuple
 import logging
 from .poolers import MeanPooler, CLSPooler, MaxPooler, AttentionPooler
+from .dora import apply_dora_to_model, count_trainable_parameters
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +27,10 @@ class GemmaEncoder(nn.Module):
         freeze_encoder: bool = False,
         device: Optional[str] = None,
         use_gradient_checkpointing: bool = False,
+        use_dora: bool = True,
+        dora_rank: int = 16,
+        dora_alpha: float = 32.0,
+        dora_dropout: float = 0.05,
     ):
         super().__init__()
         self.model_name = model_name
@@ -38,10 +43,30 @@ class GemmaEncoder(nn.Module):
             device_map=self.device,
             trust_remote_code=True,
         )
-        self.model.config.use_cache = False
+        self._get_text_config().use_cache = False
 
         # Enable bidirectional attention (critical for encoder tasks)
         self._enable_bidirectional_attention()
+
+        # Apply DoRA for parameter-efficient fine-tuning
+        if use_dora:
+            logger.info(f"Applying DoRA (rank={dora_rank}, alpha={dora_alpha})...")
+            # Target all attention projections for maximum efficiency
+            target_modules = ['q_proj', 'k_proj', 'v_proj', 'o_proj']
+            self.model = apply_dora_to_model(
+                self.model,
+                target_modules=target_modules,
+                rank=dora_rank,
+                alpha=dora_alpha,
+                dropout=dora_dropout,
+            )
+            trainable, total, pct = count_trainable_parameters(self.model)
+            logger.info(f"Trainable parameters: {trainable:,} / {total:,} ({pct:.2f}%)")
+        else:
+            # Freeze encoder if DoRA not used
+            if freeze_encoder:
+                for param in self.model.parameters():
+                    param.requires_grad = False
 
         # Enable gradient checkpointing to reduce memory usage
         if use_gradient_checkpointing:
@@ -54,7 +79,7 @@ class GemmaEncoder(nn.Module):
                 logger.warning(f"Could not enable gradient checkpointing: {e}")
 
         self.tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
-        hidden_size = self.model.config.hidden_size
+        hidden_size = self._get_text_config().hidden_size
 
         # Initialize pooler
         if pooling_strategy == "mean":
@@ -72,9 +97,14 @@ class GemmaEncoder(nn.Module):
         if isinstance(self.pooler, nn.Module):
             self.pooler = self.pooler.to(self.device)
 
-        if freeze_encoder:
-            for param in self.model.parameters():
-                param.requires_grad = False
+    def _get_text_config(self):
+        """Get text config, handling both Gemma and Gemma3 config structures."""
+        if hasattr(self.model.config, 'text_config'):
+            # Gemma3Config - nested structure
+            return self.model.config.text_config
+        else:
+            # GemmaConfig - flat structure
+            return self.model.config
 
     def _enable_bidirectional_attention(self):
         """
@@ -165,6 +195,10 @@ class GemmaClassifier(nn.Module):
         classifier_hidden_size: Optional[int] = None,
         device: Optional[str] = None,
         use_gradient_checkpointing: bool = False,
+        use_dora: bool = True,
+        dora_rank: int = 16,
+        dora_alpha: float = 32.0,
+        dora_dropout: float = 0.05,
     ):
         super().__init__()
         self.num_classes = num_classes
@@ -176,9 +210,13 @@ class GemmaClassifier(nn.Module):
             freeze_encoder=freeze_encoder,
             device=device,
             use_gradient_checkpointing=use_gradient_checkpointing,
+            use_dora=use_dora,
+            dora_rank=dora_rank,
+            dora_alpha=dora_alpha,
+            dora_dropout=dora_dropout,
         )
 
-        hidden_size = self.encoder.model.config.hidden_size
+        hidden_size = self.encoder._get_text_config().hidden_size
 
         # Build classifier
         if classifier_hidden_size:

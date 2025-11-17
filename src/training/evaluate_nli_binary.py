@@ -16,7 +16,7 @@ from torch.utils.data import DataLoader
 from transformers import AutoTokenizer
 from sklearn.metrics import (
     accuracy_score, precision_recall_fscore_support,
-    confusion_matrix, classification_report, roc_auc_score, roc_curve
+    confusion_matrix, classification_report, roc_auc_score
 )
 import numpy as np
 import pandas as pd

@@ -47,8 +47,8 @@ docker-compose up train
 # Train with custom configuration
 docker-compose run --rm train \
     python src/training/train_gemma_hydra.py \
-    model.name=google/gemma-2-9b \
-    training.batch_size=8
+    model.name=google/gemma-3-12b-it \
+    training.batch_size=2
 ```
 
 ### 3. Development Environment

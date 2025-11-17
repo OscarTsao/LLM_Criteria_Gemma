@@ -16,7 +16,7 @@ To run training with Gemma models, you need to authenticate with HuggingFace and
 
 ### Step 2: Accept Gemma Model Terms
 
-1. Visit https://huggingface.co/google/gemma-2b
+1. Visit https://huggingface.co/google/gemma-3-4b-it
 2. Click "Agree and access repository"
 3. Fill out the form if prompted
 4. Wait for approval (usually instant)
@@ -45,7 +45,7 @@ source ~/.bashrc
 ## Verify Authentication
 
 ```bash
-python -c "from transformers import AutoTokenizer; print('Testing...'); tokenizer = AutoTokenizer.from_pretrained('google/gemma-2b'); print('✓ Authentication successful!')"
+python -c "from transformers import AutoTokenizer; print('Testing...'); tokenizer = AutoTokenizer.from_pretrained('google/gemma-3-4b-it'); print('✓ Authentication successful!')"
 ```
 
 If successful, you'll see:
@@ -87,7 +87,7 @@ make show-results
 
 ### "Access to model is restricted"
 **Cause**: Haven't accepted Gemma terms
-**Fix**: Visit https://huggingface.co/google/gemma-2b and click "Agree"
+**Fix**: Visit https://huggingface.co/google/gemma-3-4b-it and click "Agree"
 
 ### "Token has expired"
 **Cause**: Token was revoked or expired
@@ -122,8 +122,8 @@ This won't match Gemma's performance but verifies the pipeline works.
 ## What Models Require Authentication?
 
 **Require Auth (Gated)**:
-- google/gemma-2b ✓ (Used in this project)
-- google/gemma-2-9b ✓
+- google/gemma-3-4b-it ✓ (Used in this project)
+- google/gemma-3-12b-it ✓
 - meta-llama/Llama-2-*
 - meta-llama/Llama-3-*
 

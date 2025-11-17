@@ -3,7 +3,7 @@
 ## Setup
 
 ```bash
-cd /media/cvrlab308/cvrlab308_4090/YuNing/LLM_Criteria_Gemma
+cd /path/to/LLM_Criteria_Gemma
 
 # Install dependencies
 pip install -r requirements.txt
@@ -26,22 +26,18 @@ python src/training/train_gemma.py
 
 This will:
 1. Load the ReDSM5 dataset
-2. Initialize Gemma-2-2B with bidirectional attention
+2. Initialize Gemma-3-4B-IT with bidirectional attention
 3. Train for 10 epochs
-4. Save best model to `outputs/gemma_criteria/best_model.pt`
+4. Save best model to `outputs/gemma3_baseline/best_model.pt`
 
 ## Evaluate
 
 ```bash
 python src/training/evaluate.py \\
-    --checkpoint outputs/gemma_criteria/best_model.pt \\
+    --checkpoint outputs/gemma3_baseline/best_model.pt \\
     --split test
 ```
 
 ## Next Steps
 
 See `README.md` for detailed documentation and `IMPLEMENTATION_SUMMARY.md` for technical details.
-
-## Note
-
-If you encounter import errors with `poolers.py` or `gemma_encoder.py`, these files contain the full implementations in the agent outputs above. They need to be written to disk in the `src/models/` directory.

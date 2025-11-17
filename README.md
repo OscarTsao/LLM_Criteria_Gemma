@@ -20,7 +20,7 @@ from src.models.gemma_encoder import GemmaClassifier
 
 model = GemmaClassifier(
     num_classes=10,
-    model_name="google/gemma-2-2b",
+    model_name="google/gemma-3-4b-it",
     pooling_strategy="mean"
 )
 ```
@@ -50,7 +50,7 @@ The ReDSM5 dataset contains 1,484 Reddit posts annotated for 9 DSM-5 depression 
 
 ```bash
 # Clone the repository (if applicable)
-cd /media/cvrlab308/cvrlab308_4090/YuNing/LLM_Criteria_Gemma
+cd /path/to/LLM_Criteria_Gemma
 
 # Install dependencies
 pip install -r requirements.txt
@@ -74,7 +74,7 @@ python src/training/train_gemma.py
 
 ### 3. Evaluate
 ```bash
-python src/training/evaluate.py --checkpoint outputs/gemma_criteria/best_model.pt
+python src/training/evaluate.py --checkpoint outputs/gemma3_baseline/best_model.pt
 ```
 
 ## Project Structure
@@ -94,8 +94,10 @@ LLM_Criteria_Gemma/
 │   ├── training/
 │   │   ├── train_gemma.py        # Training script
 │   │   └── evaluate.py           # Evaluation script
-│   └── config/
-│       └── config.yaml           # Configuration
+├── conf/
+│   ├── config.yaml               # Hydra defaults
+│   └── experiment/
+│       └── quick_test.yaml       # Example overrides
 ├── outputs/                       # Training outputs
 ├── requirements.txt
 └── README.md
@@ -103,19 +105,22 @@ LLM_Criteria_Gemma/
 
 ## Configuration
 
-Edit `src/config/config.yaml` to customize:
-- Model size (`google/gemma-2-2b`, `google/gemma-2-9b`, etc.)
+Edit `conf/config.yaml` (Hydra defaults) or add overrides under `conf/experiment/` to customize:
+- Model checkpoint (`google/gemma-3-4b-it` by default)
 - Pooling strategy
 - Hyperparameters (learning rate, dropout, batch size)
-- Data splits
+- Data splits and CV settings
 
-## Model Sizes
+## Model Options
 
-| Model | Parameters | GPU Memory | Recommendation |
-|-------|-----------|------------|----------------|
-| google/gemma-2-2b | 2B | ~8GB | Recommended for most tasks |
-| google/gemma-2-9b | 9B | ~20GB | Better performance, more resources |
-| google/gemma-2-27b | 27B | ~60GB | Best performance, high resources |
+The project now targets the Gemma-3 family. Override `model.name` to explore other checkpoints.
+
+| Model | Parameters | GPU Memory* | Notes |
+|-------|-----------|-------------|-------|
+| google/gemma-3-4b-it | 4B | ~16GB | Default instruct-tuned encoder-friendly choice |
+| google/gemma-3-12b-it | 12B | ~48GB | Higher accuracy, requires larger GPUs |
+
+<sub>*Approximate memory when fine-tuning with bfloat16.</sub>
 
 ## Results
 
@@ -127,7 +132,7 @@ Expected performance on ReDSM5 criteria matching:
 Comparison with baselines (from DataAug_Criteria_Evidence project):
 - BERT baseline: F1 ~0.65
 - RoBERTa baseline: F1 ~0.70
-- **Gemma-2-2b (ours)**: F1 ~0.72-0.75
+- **Gemma-3-4b-it (ours)**: F1 ~0.72-0.75
 
 ## Key Implementation Details
 

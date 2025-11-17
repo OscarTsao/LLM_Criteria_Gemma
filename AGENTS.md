@@ -1,13 +1,13 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-- `src/` contains the production code: models under `src/models/`, training scripts in `src/training/`, shared helpers in `src/utils/`, and configuration glue in `src/config/`.
+- `src/` contains the production code: models under `src/models/`, training scripts in `src/training/`, shared helpers in `src/utils/`, and Hydra configuration glue in `conf/`.
 - Hydra defaults live in `conf/config.yaml`; experiment presets (e.g., `quick_test`) sit in `conf/experiment/` and should mirror new research variants.
 - Place source data in `data/redsm5/` and write all derived artifacts to `outputs/<experiment>/` so long runs stay isolated and reproducible.
 
 ## Build, Test, and Development Commands
 - `make install` installs runtime deps; `make install-dev` adds pytest, black, flake8, and mypy.
-- `make train-quick` (two folds, three epochs) is the staging run before `make train-5fold`, which produces `outputs/gemma_5fold/`.
+- `make train-quick` (two folds, three epochs) is the staging run before `make train-5fold`, which produces `outputs/gemma3_it_5fold-google_gemma-3-4b-it-*/`.
 - Evaluate checkpoints with `make evaluate CHECKPOINT=outputs/<run>/best_model.pt` or `make evaluate-best` for the canonical 5-fold result.
 - Quality gates: `make lint`, `make format`, `make type-check`, and `make test` must stay green before a merge.
 

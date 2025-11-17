@@ -179,18 +179,20 @@ class GemmaTrainer:
 
 def main():
     """Main training function."""
+    project_root = Path(__file__).resolve().parents[2]
+
     # Configuration
     config = {
-        'model_name': 'google/gemma-2-2b',
+        'model_name': 'google/gemma-3-4b-it',
         'pooling_strategy': 'mean',  # Options: mean, cls, max, attention_kv, attention_query
         'hidden_dropout_prob': 0.1,
         'classifier_hidden_size': 768,
         'learning_rate': 2e-5,
-        'batch_size': 16,
+        'batch_size': 4,
         'num_epochs': 10,
         'max_length': 512,
-        'data_dir': '/media/cvrlab308/cvrlab308_4090/YuNing/LLM_Criteria_Gemma/data/redsm5',
-        'output_dir': './outputs/gemma_criteria',
+        'data_dir': str(project_root / 'data' / 'redsm5'),
+        'output_dir': str(project_root / 'outputs' / 'gemma3_baseline'),
     }
 
     print("Loading tokenizer...")

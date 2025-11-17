@@ -21,7 +21,7 @@ class GemmaEncoder(nn.Module):
 
     def __init__(
         self,
-        model_name: str = "google/gemma-2b",
+        model_name: str = "google/gemma-3-4b-it",
         pooling_strategy: str = "mean",
         freeze_encoder: bool = False,
         device: Optional[str] = None,
@@ -158,7 +158,7 @@ class GemmaClassifier(nn.Module):
     def __init__(
         self,
         num_classes: int,
-        model_name: str = "google/gemma-2b",
+        model_name: str = "google/gemma-3-4b-it",
         pooling_strategy: str = "mean",
         freeze_encoder: bool = False,
         hidden_dropout_prob: float = 0.1,

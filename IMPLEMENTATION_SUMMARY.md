@@ -146,26 +146,26 @@ Labels: 0 (absent) or 1 (present)
 
 ### 1. Train Model
 ```bash
-cd /media/cvrlab308/cvrlab308_4090/YuNing/LLM_Criteria_Gemma
+cd /path/to/LLM_Criteria_Gemma
 python src/training/train_gemma.py
 ```
 
 ### 2. Evaluate Model
 ```bash
 python src/training/evaluate.py \\
-    --checkpoint outputs/gemma_criteria/best_model.pt \\
+    --checkpoint outputs/gemma3_baseline/best_model.pt \\
     --split test
 ```
 
 ### 3. Custom Configuration
-Edit `src/config/config.yaml`:
+Edit `conf/config.yaml`:
 ```yaml
 model:
-  name: "google/gemma-2-2b"
-  pooling_strategy: "mean"  # or attention_kv, attention_query
+  name: "google/gemma-3-4b-it"
+  pooling_strategy: "mean"  # or cls, max, attention
 
 training:
-  batch_size: 16
+  batch_size: 4
   learning_rate: 2e-5
   num_epochs: 10
 ```
@@ -179,12 +179,12 @@ from src.data.redsm5_dataset import load_redsm5
 # Load model
 model = GemmaClassifier(
     num_classes=10,
-    model_name="google/gemma-2-2b",
+    model_name="google/gemma-3-4b-it",
     pooling_strategy="mean"
 )
 
 # Load data
-tokenizer = AutoTokenizer.from_pretrained("google/gemma-2-2b")
+tokenizer = AutoTokenizer.from_pretrained("google/gemma-3-4b-it")
 train_ds, val_ds, test_ds = load_redsm5(
     data_dir="./data/redsm5",
     tokenizer=tokenizer
@@ -197,14 +197,14 @@ train_ds, val_ds, test_ds = load_redsm5(
 
 Based on the Gemma Encoder paper and ReDSM5 baseline:
 
-| Metric | BERT Baseline | RoBERTa | Gemma-2-2B (Expected) |
+| Metric | BERT Baseline | RoBERTa | Gemma-3-4B-IT (Expected) |
 |--------|---------------|---------|----------------------|
 | Accuracy | 70-75% | 75-78% | **75-80%** |
 | Macro F1 | 0.65 | 0.70 | **0.72-0.75** |
-| Parameters | 110M | 125M | 2B |
+| Parameters | 110M | 125M | 4B |
 
 **Key advantages**:
-- Larger model capacity (2B vs 110M params)
+- Larger model capacity (4B vs 110M params)
 - Bidirectional attention fine-tuning
 - Advanced pooling strategies
 - Better contextual understanding

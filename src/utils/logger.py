@@ -217,7 +217,7 @@ if __name__ == '__main__':
 
     # Example 3: Log configuration
     config = {
-        'model': {'name': 'gemma-2b', 'pooling': 'mean'},
+        'model': {'name': 'gemma-3-4b-it', 'pooling': 'mean'},
         'training': {'lr': 2e-5, 'epochs': 10},
     }
     log_experiment_config(logger2, config)

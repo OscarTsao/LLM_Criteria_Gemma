@@ -3,7 +3,7 @@ Training script with Hydra configuration and 5-fold cross-validation.
 
 Usage:
     python src/training/train_gemma_hydra.py
-    python src/training/train_gemma_hydra.py model.name=google/gemma-2-9b training.batch_size=8
+    python src/training/train_gemma_hydra.py model.name=google/gemma-3-4b-it training.batch_size=4
     python src/training/train_gemma_hydra.py cv.num_folds=10
 """
 

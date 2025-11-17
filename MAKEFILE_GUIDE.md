@@ -30,7 +30,6 @@ make train-quick       # Quick test (2 folds, 3 epochs)
 
 ### Model Variants
 ```bash
-make train-gemma9b     # Use Gemma-9B (larger model)
 make train-attention   # Use attention pooling
 make train-10fold      # 10-fold cross-validation
 ```
@@ -38,14 +37,14 @@ make train-10fold      # 10-fold cross-validation
 ### Custom Training
 ```bash
 # You can still use Hydra overrides:
-python src/training/train_gemma_hydra.py model.name=google/gemma-2-9b training.batch_size=8
+python src/training/train_gemma_hydra.py model.name=google/gemma-3-4b-it training.batch_size=8
 ```
 
 ## Evaluation Commands
 
 ```bash
 # Evaluate specific checkpoint
-make evaluate CHECKPOINT=outputs/gemma_5fold/fold_0/best_model.pt
+make evaluate CHECKPOINT=outputs/gemma3_it_5fold/fold_0/best_model.pt
 
 # Evaluate best model from 5-fold CV
 make evaluate-best
@@ -169,7 +168,7 @@ make test              # Run tests
 
 ### 1. Initial Setup
 ```bash
-cd /media/cvrlab308/cvrlab308_4090/YuNing/LLM_Criteria_Gemma
+cd /path/to/LLM_Criteria_Gemma
 make install
 make check-data
 make test-imports
@@ -190,7 +189,7 @@ make show-results
 
 ### 4. Evaluate Model
 ```bash
-make evaluate CHECKPOINT=outputs/gemma_5fold/fold_0/best_model.pt
+make evaluate CHECKPOINT=outputs/gemma3_it_5fold/fold_0/best_model.pt
 ```
 
 ### 5. Compare Pooling Strategies
@@ -249,7 +248,7 @@ make evaluate CHECKPOINT=path/to/model.pt
 ### "No module named 'src'"
 Make sure you're in the project root:
 ```bash
-cd /media/cvrlab308/cvrlab308_4090/YuNing/LLM_Criteria_Gemma
+cd /path/to/LLM_Criteria_Gemma
 make train-5fold
 ```
 

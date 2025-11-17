@@ -176,7 +176,7 @@ def main():
         model_config = cfg.get('model', {})
         data_config = cfg.get('data', {})
 
-        model_name = model_config.get('name', 'google/gemma-2-2b')
+        model_name = model_config.get('name', 'google/gemma-3-4b-it')
         pooling_strategy = model_config.get('pooling_strategy', 'mean')
         freeze_encoder = model_config.get('freeze_encoder', False)
         hidden_dropout_prob = model_config.get('hidden_dropout_prob', 0.1)
@@ -189,7 +189,7 @@ def main():
         print(f"  Pooling: {pooling_strategy}")
     else:
         print("Warning: No config found in checkpoint, using default values")
-        model_name = 'google/gemma-2-2b'
+        model_name = 'google/gemma-3-4b-it'
         pooling_strategy = 'mean'
         freeze_encoder = False
         hidden_dropout_prob = 0.1

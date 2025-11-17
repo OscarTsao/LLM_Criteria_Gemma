@@ -12,7 +12,7 @@ python src/training/train_gemma_hydra.py
 ### Override Parameters
 ```bash
 # Change model size
-python src/training/train_gemma_hydra.py model.name=google/gemma-2-9b
+python src/training/train_gemma_hydra.py model.name=google/gemma-3-12b-it training.batch_size=2
 
 # Adjust batch size and learning rate
 python src/training/train_gemma_hydra.py training.batch_size=8 training.learning_rate=3e-5
@@ -48,7 +48,7 @@ conf/
 ### Model Configuration
 ```yaml
 model:
-  name: google/gemma-2b              # Model size
+  name: google/gemma-3-4b-it         # Model checkpoint
   pooling_strategy: mean             # Pooling method
   freeze_encoder: false              # Freeze encoder weights
   hidden_dropout_prob: 0.1           # Dropout rate
@@ -59,7 +59,7 @@ model:
 ```yaml
 training:
   num_epochs: 10                     # Training epochs
-  batch_size: 16                     # Batch size
+  batch_size: 4                      # Batch size
   learning_rate: 2e-5                # Learning rate
   weight_decay: 0.01                 # Weight decay
   warmup_ratio: 0.1                  # Warmup ratio
@@ -78,7 +78,7 @@ cv:
 ### Data Configuration
 ```yaml
 data:
-  data_dir: /path/to/redsm5          # Dataset directory
+  data_dir: ${hydra:runtime.cwd}/data/redsm5  # Dataset directory
   max_length: 512                    # Max sequence length
   num_folds: 5                       # Number of CV folds
   random_seed: 42                    # Random seed
@@ -90,7 +90,7 @@ After training, outputs are organized as:
 
 ```
 outputs/
-└── gemma_5fold/                    # Experiment name
+└── gemma3_it_5fold-google_gemma-3-4b-it-<timestamp>/
     ├── fold_0/
     │   ├── best_model.pt           # Best model checkpoint
     │   └── history.json            # Training history
@@ -129,7 +129,7 @@ The `aggregate_results.json` contains:
 for seed in 42 123 456; do
     python src/training/train_gemma_hydra.py \
         data.random_seed=$seed \
-        output.experiment_name=gemma_5fold_seed${seed}
+        output.experiment_name=gemma3_it_5fold_seed${seed}
 done
 ```
 
@@ -146,7 +146,7 @@ Create `conf/experiment/my_experiment.yaml`:
 # @package _global_
 
 model:
-  name: google/gemma-2-9b
+  name: google/gemma-3-12b-it
   pooling_strategy: attention
 
 training:

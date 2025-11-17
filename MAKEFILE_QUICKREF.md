@@ -28,7 +28,6 @@ make show-results      # Display CV results
 | `make train-quick` | 2 folds, 3 epochs | ~30 min |
 | `make train-5fold` | 5 folds, 10 epochs | ~2-3 hrs |
 | `make train-10fold` | 10 folds, 10 epochs | ~4-6 hrs |
-| `make train-gemma9b` | Gemma-9B (larger) | ~8 hrs |
 | `make train-attention` | With attention pooling | ~2-3 hrs |
 
 ### Evaluation
@@ -92,7 +91,7 @@ make test
 
 ### After `make train-5fold`
 ```
-outputs/gemma_5fold/
+outputs/gemma3_it_5fold/
 ├── fold_0/best_model.pt
 ├── fold_1/best_model.pt
 ├── fold_2/best_model.pt
@@ -117,7 +116,7 @@ outputs/gemma_5fold/
 ### Custom Parameters (use Hydra directly)
 ```bash
 python src/training/train_gemma_hydra.py \
-    model.name=google/gemma-2-9b \
+    model.name=google/gemma-3-4b-it \
     training.batch_size=8 \
     training.learning_rate=3e-5 \
     cv.num_folds=10
@@ -125,7 +124,7 @@ python src/training/train_gemma_hydra.py \
 
 ### Evaluate Specific Model
 ```bash
-make evaluate CHECKPOINT=outputs/gemma_5fold/fold_0/best_model.pt
+make evaluate CHECKPOINT=outputs/gemma3_it_5fold/fold_0/best_model.pt
 ```
 
 ### Run Experiments

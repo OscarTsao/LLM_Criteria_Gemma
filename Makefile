@@ -1,7 +1,7 @@
 # Makefile for Gemma Encoder on ReDSM5
 # Usage: make <target>
 
-.PHONY: help install test clean train train-5fold train-5fold-mentallama train-5fold-gemma train-5fold-both train-quick evaluate lint format check-gpu
+.PHONY: help install test clean train train-5fold train-quick evaluate lint format check-gpu
 
 # Default target
 .DEFAULT_GOAL := help
@@ -25,23 +25,11 @@ install-dev: ## Install with development dependencies
 train: ## Train with original script (single split)
 	python src/training/train_gemma.py
 
-train-5fold: train-5fold-mentallama ## Alias: run default 5-fold training (MentaLLaMA)
-
-train-5fold-mentallama: ## Train 5-fold CV with MentaLLaMA-chat-7B encoder
-	python src/training/train_gemma_hydra.py output.experiment_name=mentallama_5fold
-
-train-5fold-gemma: ## Train 5-fold CV with Gemma-2 (unfrozen encoder)
-	python src/training/train_gemma_hydra.py model.name=google/gemma-2-9b model.freeze_encoder=false training.batch_size=2 output.experiment_name=gemma_5fold
-
-train-5fold-both: ## Train 5-fold CV sequentially for MentaLLaMA then Gemma
-	@$(MAKE) train-5fold-mentallama
-	@$(MAKE) train-5fold-gemma
+train-5fold: ## Train 5-fold CV with google/gemma-3-4b-it encoder
+	python src/training/train_gemma_hydra.py model.name=google/gemma-3-4b-it output.experiment_name=gemma3_it_5fold
 
 train-quick: ## Quick test (2 folds, 3 epochs)
 	python src/training/train_gemma_hydra.py experiment=quick_test
-
-train-gemma9b: ## Train with Gemma-9B model
-	python src/training/train_gemma_hydra.py model.name=google/gemma-2-9b training.batch_size=8
 
 train-attention: ## Train with attention pooling
 	python src/training/train_gemma_hydra.py model.pooling_strategy=attention

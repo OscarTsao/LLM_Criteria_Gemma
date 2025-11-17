@@ -3,7 +3,7 @@
 ## Prerequisites
 
 ```bash
-cd /media/cvrlab308/cvrlab308_4090/YuNing/LLM_Criteria_Gemma
+cd /path/to/LLM_Criteria_Gemma
 pip install -r requirements.txt
 ```
 
@@ -15,7 +15,7 @@ python src/training/train_gemma_hydra.py
 
 This will:
 1. Create stratified 5-fold splits of ReDSM5 dataset
-2. Train Gemma-2B encoder on each fold
+2. Train Gemma-3-4B-IT encoder on each fold
 3. Save best model for each fold
 4. Compute aggregate statistics (mean F1, std, min, max)
 
@@ -28,7 +28,7 @@ Gemma Encoder 5-Fold Cross-Validation
 
 Device: cuda
 
-Loading tokenizer: google/gemma-2b
+Loading tokenizer: google/gemma-3-4b-it
 
 Creating 5-fold cross-validation splits...
 Fold 0: Train=1237, Val=310
@@ -40,7 +40,7 @@ Fold 4: Train=1238, Val=309
 ================================================================================
 Starting Fold 1/5
 ================================================================================
-Loading google/gemma-2b...
+Loading google/gemma-3-4b-it...
 Train samples: 1237
 Val samples: 310
 
@@ -69,14 +69,14 @@ Mean F1: 0.7229 ± 0.0056
 Min F1: 0.7156
 Max F1: 0.7301
 
-Results saved to: outputs/gemma_5fold
+Results saved to: outputs/gemma3_it_5fold-google_gemma-3-4b-it-<timestamp>
 ================================================================================
 ```
 
 ## Output Files
 
 ```
-outputs/gemma_5fold/
+outputs/gemma3_it_5fold-google_gemma-3-4b-it-<timestamp>/
 ├── fold_0/
 │   ├── best_model.pt          # Best checkpoint (F1: 0.7234)
 │   └── history.json           # Training curves
@@ -99,11 +99,11 @@ import torch
 from src.models.gemma_encoder import GemmaClassifier
 
 # Load best model from fold 0
-checkpoint = torch.load('outputs/gemma_5fold/fold_0/best_model.pt')
+checkpoint = torch.load('outputs/gemma3_it_5fold-google_gemma-3-4b-it-<timestamp>/fold_0/best_model.pt')
 
 model = GemmaClassifier(
     num_classes=10,
-    model_name='google/gemma-2b',
+    model_name='google/gemma-3-4b-it',
     pooling_strategy='mean'
 )
 model.load_state_dict(checkpoint['model_state_dict'])
@@ -117,7 +117,7 @@ model.eval()
 
 ### Change Model Size
 ```bash
-python src/training/train_gemma_hydra.py model.name=google/gemma-2-9b
+python src/training/train_gemma_hydra.py model.name=google/gemma-3-12b-it training.batch_size=2
 ```
 
 ### Adjust Training
@@ -147,16 +147,16 @@ python src/training/train_gemma_hydra.py experiment=quick_test
 
 | Model | Folds | Epochs | GPU | Time |
 |-------|-------|--------|-----|------|
-| Gemma-2B | 5 | 10 | A100 | ~2 hours |
-| Gemma-2B | 5 | 10 | RTX 4090 | ~3 hours |
-| Gemma-9B | 5 | 10 | A100 | ~8 hours |
+| Gemma-3-4B-IT | 5 | 10 | A100 | ~2 hours |
+| Gemma-3-4B-IT | 5 | 10 | RTX 4090 | ~3 hours |
+| Gemma-3-12B-IT | 5 | 10 | A100 80GB | ~8 hours |
 
 ## Troubleshooting
 
 ### OOM Error
 ```bash
 # Reduce batch size
-python src/training/train_gemma_hydra.py training.batch_size=8
+python src/training/train_gemma_hydra.py training.batch_size=2
 
 # Or use gradient accumulation (TODO: add to config)
 ```

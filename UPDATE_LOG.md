@@ -34,8 +34,8 @@ python src/training/train_gemma_hydra.py
 ### With Parameter Overrides
 ```bash
 python src/training/train_gemma_hydra.py \
-    model.name=google/gemma-2-9b \
-    training.batch_size=8 \
+    model.name=google/gemma-3-12b-it \
+    training.batch_size=2 \
     cv.num_folds=10
 ```
 
@@ -83,7 +83,6 @@ outputs/
 - 5-fold stratified CV
 - Hydra configuration management
 - Aggregate statistics
-- Professional experiment tracking
 
 ## Benefits
 
@@ -109,7 +108,6 @@ python src/training/train_gemma.py
 - [ ] Add ensemble prediction from all 5 folds
 - [ ] Implement Hydra multirun for hyperparameter sweeps
 - [ ] Add test set evaluation after CV
-- [ ] Integrate with MLflow for experiment tracking
 
 ---
 **Date**: November 5, 2025

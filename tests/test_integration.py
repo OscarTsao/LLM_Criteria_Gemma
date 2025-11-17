@@ -29,7 +29,7 @@ class TestModelInitialization:
         pytest.skip("Requires model download - run manually if needed")
 
         encoder = GemmaEncoder(
-            model_name="google/gemma-2-2b",
+            model_name="google/gemma-3-4b-it",
             pooling_strategy="mean",
             freeze_encoder=True,
         )
@@ -44,7 +44,7 @@ class TestModelInitialization:
 
         model = GemmaClassifier(
             num_classes=NUM_CLASSES,
-            model_name="google/gemma-2-2b",
+            model_name="google/gemma-3-4b-it",
             pooling_strategy="mean",
             freeze_encoder=True,
         )
@@ -331,7 +331,7 @@ class TestConfigurationIntegration:
 
         # Base config
         base_cfg = OmegaConf.create({
-            'model': {'name': 'google/gemma-2-2b', 'batch_size': 16},
+            'model': {'name': 'google/gemma-3-4b-it', 'batch_size': 4},
             'training': {'lr': 2e-5},
         })
 
@@ -343,7 +343,7 @@ class TestConfigurationIntegration:
         # Merge
         merged = OmegaConf.merge(base_cfg, override_cfg)
 
-        assert merged.model.name == 'google/gemma-2-2b'
+        assert merged.model.name == 'google/gemma-3-4b-it'
         assert merged.model.batch_size == 32
         assert merged.training.lr == 2e-5
 

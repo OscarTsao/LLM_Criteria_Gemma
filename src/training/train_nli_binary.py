@@ -16,7 +16,7 @@ from omegaconf import DictConfig, OmegaConf
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
-from torch.cuda.amp import autocast
+from torch.amp import autocast
 from transformers import AutoTokenizer, get_linear_schedule_with_warmup
 from sklearn.metrics import (
     accuracy_score, precision_recall_fscore_support,
@@ -78,7 +78,7 @@ class BinaryNLITrainer:
             optimizer.zero_grad()
 
             if self.use_amp:
-                with autocast(dtype=torch.bfloat16):
+                with autocast('cuda', dtype=torch.bfloat16):
                     outputs = model(input_ids, attention_mask)
                     loss = criterion(outputs, labels)
 
@@ -120,7 +120,7 @@ class BinaryNLITrainer:
             labels = batch['labels'].to(self.device)
 
             if self.use_amp:
-                with autocast(dtype=torch.bfloat16):
+                with autocast('cuda', dtype=torch.bfloat16):
                     outputs = model(input_ids, attention_mask)
                     loss = criterion(outputs, labels)
             else:
@@ -262,11 +262,22 @@ class BinaryNLITrainer:
 
                 # Log model to MLflow (second part of dual saving)
                 if self.use_mlflow:
+                    # Create input example for model signature
+                    try:
+                        sample_batch = next(iter(val_loader))
+                        input_example = (
+                            sample_batch['input_ids'][:1].to(self.device),
+                            sample_batch['attention_mask'][:1].to(self.device)
+                        )
+                    except:
+                        input_example = None
+
                     # Log the model artifact
                     mlflow.pytorch.log_model(
                         model,
-                        artifact_path="model",
+                        name="model",  # Changed from artifact_path to name
                         registered_model_name=None,  # Don't auto-register
+                        input_example=input_example,  # Add input example for signature
                     )
                     # Log the checkpoint file as well
                     mlflow.log_artifact(str(checkpoint_path), artifact_path="checkpoints")

@@ -9,6 +9,18 @@ This project implements best methods from the Gemma Encoder paper for criteria m
 - **Multiple pooling strategies** (Mean, First-K, Last-K, Attention-based)
 - **Hyperparameter optimization** for dropout rates and architecture
 - **GLUE-style evaluation metrics** for classification performance
+- **Binary NLI criteria matching** for interpretable post-criterion matching (NEW!)
+
+### Two Task Formulations
+
+This project supports two complementary approaches:
+
+1. **Multi-class Classification** (Original): Classify each post into one of 10 symptom categories
+2. **Binary NLI Criteria Matching** (NEW): Binary classification for post-criterion pairs
+   - Input: `[CLS] post [SEP] criterion [SEP]`
+   - Output: `matched` or `unmatched`
+   - Creates 1,484 posts × 9 criteria = 13,356 training examples
+   - See [Binary NLI Documentation](docs/BINARY_NLI_CRITERIA_MATCHING.md) for details
 
 ## Key Features
 
@@ -58,42 +70,68 @@ pip install -r requirements.txt
 
 ## Quick Start
 
-### 1. Prepare Data
-The ReDSM5 dataset should be in `data/redsm5/`:
-```
-data/redsm5/
-├── redsm5_posts.csv
-├── redsm5_annotations.csv
-└── README.md
-```
+### Multi-class Classification (Original)
 
-### 2. Train Model
-```bash
-python src/training/train_gemma_hydra.py
-```
+1. **Prepare Data**: Ensure ReDSM5 dataset is in `data/redsm5/`
+2. **Train Model**:
+   ```bash
+   python src/training/train_gemma_hydra.py
+   ```
+3. **Evaluate**:
+   ```bash
+   python src/training/evaluate.py --checkpoint outputs/gemma3_baseline/best_model.pt
+   ```
 
-### 3. Evaluate
-```bash
-python src/training/evaluate.py --checkpoint outputs/gemma3_baseline/best_model.pt
-```
+### Binary NLI Criteria Matching (NEW)
+
+1. **Prepare Data**: Same as above
+2. **Train Binary NLI Model**:
+   ```bash
+   python src/training/train_nli_binary.py
+   ```
+3. **Evaluate**:
+   ```bash
+   python src/training/evaluate_nli_binary.py --checkpoint outputs/nli_binary-*/best_model.pt
+   ```
+4. **Test Dataset**:
+   ```bash
+   python tests/test_nli_dataset.py
+   ```
+
+See [Binary NLI Documentation](docs/BINARY_NLI_CRITERIA_MATCHING.md) for comprehensive guide.
 
 ## Project Structure
 
 ```
 LLM_Criteria_Gemma/
 ├── data/
+│   ├── DSM5/
+│   │   └── MDD_Criteria.json     # DSM-5 criteria (placeholder)
 │   └── redsm5/
 │       ├── redsm5_posts.csv
 │       └── redsm5_annotations.csv
 ├── src/
 │   ├── models/
 │   │   ├── poolers.py            # Pooling strategies
-│   │   └── gemma_encoder.py      # Bidirectional Gemma encoder
+│   │   ├── gemma_encoder.py      # Bidirectional Gemma encoder
+│   │   └── dora.py               # DoRA parameter-efficient fine-tuning
 │   ├── data/
-│   │   └── redsm5_dataset.py     # Dataset loaders
+│   │   ├── dsm5_criteria.py      # DSM-5 criterion descriptions (NEW)
+│   │   ├── redsm5_nli_dataset.py # Binary NLI dataset loader (NEW)
+│   │   ├── redsm5_dataset.py     # Original multi-class dataset
+│   │   └── cv_splits.py          # Cross-validation utilities
 │   ├── training/
-│   │   ├── train_gemma_hydra.py  # Training script with Hydra config
-│   │   └── evaluate.py           # Evaluation script
+│   │   ├── train_nli_binary.py   # Binary NLI training (NEW)
+│   │   ├── evaluate_nli_binary.py # Binary NLI evaluation (NEW)
+│   │   ├── train_gemma_hydra.py  # Multi-class training with CV
+│   │   └── evaluate.py           # Multi-class evaluation
+│   └── utils/
+│       └── logger.py             # Logging utilities
+├── tests/
+│   ├── test_nli_dataset.py       # Test binary NLI dataset (NEW)
+│   └── test_*.py                 # Other tests
+├── docs/
+│   └── BINARY_NLI_CRITERIA_MATCHING.md  # Binary NLI guide (NEW)
 ├── conf/
 │   ├── config.yaml               # Hydra defaults
 │   └── experiment/

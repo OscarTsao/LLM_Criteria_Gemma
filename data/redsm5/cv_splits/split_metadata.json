@@ -1,6 +1,0 @@
-{
-  "num_folds": 5,
-  "random_seed": 42,
-  "total_samples": 2058,
-  "num_classes": 10
-}

@@ -46,12 +46,15 @@ outputs/
 *.json.gz
 *.parquet
 
-# Logs
+# Logs and experiment tracking
 *.log
 logs/
 wandb/
 .neptune/
 mlruns/
+mlflow.db
+mlflow.db-shm
+mlflow.db-wal
 
 # Jupyter
 .ipynb_checkpoints/

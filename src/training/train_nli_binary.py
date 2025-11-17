@@ -29,6 +29,8 @@ import json
 from datetime import datetime
 from tqdm.auto import tqdm
 import sys
+import mlflow
+import mlflow.pytorch
 
 # Add src to path
 sys.path.append(str(Path(__file__).parent.parent))
@@ -47,7 +49,7 @@ NUM_CLASSES = 2
 class BinaryNLITrainer:
     """Trainer for Binary NLI Criteria Matching."""
 
-    def __init__(self, cfg: DictConfig, run_dir: Path, device: str = 'cuda', logger=None):
+    def __init__(self, cfg: DictConfig, run_dir: Path, device: str = 'cuda', logger=None, use_mlflow: bool = False):
         self.cfg = cfg
         self.device = device
         self.run_dir = run_dir
@@ -57,6 +59,7 @@ class BinaryNLITrainer:
         self.patience = cfg.training.get('early_stopping_patience')
         self.min_delta = float(cfg.training.get('early_stopping_min_delta', 0.0))
         self.logger = logger
+        self.use_mlflow = use_mlflow
 
         # Mixed precision training
         self.use_amp = cfg.device.mixed_precision
@@ -224,6 +227,20 @@ class BinaryNLITrainer:
                 self.logger.info(f"Val F1 (binary): {val_metrics['f1']:.4f}")
                 self.logger.info(f"Val F1 (macro): {val_metrics['f1_macro']:.4f}")
 
+            # Log metrics to MLflow
+            if self.use_mlflow:
+                mlflow.log_metrics({
+                    'train_loss': train_loss,
+                    'val_loss': val_metrics['loss'],
+                    'val_accuracy': val_metrics['accuracy'],
+                    'val_precision': val_metrics['precision'],
+                    'val_recall': val_metrics['recall'],
+                    'val_f1': val_metrics['f1'],
+                    'val_f1_macro': val_metrics['f1_macro'],
+                    'val_precision_macro': val_metrics['precision_macro'],
+                    'val_recall_macro': val_metrics['recall_macro'],
+                }, step=epoch)
+
             # Save best model
             improved = val_metrics['f1'] > (self.best_val_f1 + self.min_delta)
             if improved:
@@ -233,6 +250,7 @@ class BinaryNLITrainer:
                 history['best_epoch'] = self.best_epoch
                 history['best_val_f1'] = self.best_val_f1
 
+                # Save locally (first part of dual saving)
                 checkpoint_path = self.run_dir / 'best_model.pt'
                 torch.save({
                     'model_state_dict': model.state_dict(),
@@ -242,8 +260,24 @@ class BinaryNLITrainer:
                     'config': OmegaConf.to_container(self.cfg, resolve=True),
                 }, checkpoint_path)
 
+                # Log model to MLflow (second part of dual saving)
+                if self.use_mlflow:
+                    # Log the model artifact
+                    mlflow.pytorch.log_model(
+                        model,
+                        artifact_path="model",
+                        registered_model_name=None,  # Don't auto-register
+                    )
+                    # Log the checkpoint file as well
+                    mlflow.log_artifact(str(checkpoint_path), artifact_path="checkpoints")
+                    # Log best metrics
+                    mlflow.log_metrics({
+                        'best_epoch': self.best_epoch,
+                        'best_val_f1': self.best_val_f1,
+                    })
+
                 if self.logger:
-                    self.logger.info(f"✓ Best model saved (Epoch {self.best_epoch}, F1: {self.best_val_f1:.4f})")
+                    self.logger.info(f"✓ Best model saved locally and to MLflow (Epoch {self.best_epoch}, F1: {self.best_val_f1:.4f})" if self.use_mlflow else f"✓ Best model saved (Epoch {self.best_epoch}, F1: {self.best_val_f1:.4f})")
             else:
                 self.epochs_without_improvement += 1
                 if self.patience and self.epochs_without_improvement >= self.patience:
@@ -389,8 +423,66 @@ def main(cfg: DictConfig):
         class_weights = get_class_weights(train_dataset)
         logger.info(f"\nUsing class weights: {class_weights.numpy()}")
 
+    # Setup MLflow tracking
+    use_mlflow = cfg.mlflow.get('enabled', False)
+    if use_mlflow:
+        # Set tracking URI and artifact location
+        mlflow.set_tracking_uri(to_absolute_path(cfg.mlflow.tracking_uri))
+
+        # Create or get experiment
+        experiment_name = cfg.mlflow.experiment_name
+        experiment = mlflow.get_experiment_by_name(experiment_name)
+        if experiment is None:
+            experiment_id = mlflow.create_experiment(
+                experiment_name,
+                artifact_location=to_absolute_path(cfg.mlflow.artifact_location)
+            )
+        else:
+            experiment_id = experiment.experiment_id
+
+        # Start MLflow run
+        run_name = cfg.mlflow.get('run_name') or run_name
+        mlflow.start_run(experiment_id=experiment_id, run_name=run_name)
+
+        # Log all configuration parameters
+        mlflow.log_params({
+            'model_name': cfg.model.name,
+            'pooling_strategy': cfg.model.pooling_strategy,
+            'batch_size': cfg.training.batch_size,
+            'learning_rate': cfg.training.learning_rate,
+            'num_epochs': cfg.training.num_epochs,
+            'weight_decay': cfg.training.weight_decay,
+            'warmup_ratio': cfg.training.warmup_ratio,
+            'max_grad_norm': cfg.training.max_grad_norm,
+            'use_class_weights': cfg.training.use_class_weights,
+            'early_stopping_patience': cfg.training.early_stopping_patience,
+            'max_length': cfg.data.max_length,
+            'test_size': cfg.data.test_size,
+            'val_size': cfg.data.val_size,
+            'use_dora': cfg.model.get('use_dora', True),
+            'dora_rank': cfg.model.get('dora_rank', 16),
+            'dora_alpha': cfg.model.get('dora_alpha', 32.0),
+            'mixed_precision': cfg.device.mixed_precision,
+            'gradient_checkpointing': cfg.model.get('use_gradient_checkpointing', False),
+        })
+
+        # Log dataset statistics
+        mlflow.log_metrics({
+            'train_size': len(train_dataset),
+            'val_size': len(val_dataset),
+            'test_size': len(test_dataset),
+        })
+
+        # Log tags
+        if 'tags' in cfg.mlflow:
+            mlflow.set_tags(OmegaConf.to_container(cfg.mlflow.tags, resolve=True))
+
+        logger.info(f"MLflow tracking enabled: {mlflow.get_tracking_uri()}")
+        logger.info(f"MLflow experiment: {experiment_name}")
+        logger.info(f"MLflow run ID: {mlflow.active_run().info.run_id}")
+
     # Train model
-    trainer = BinaryNLITrainer(cfg, run_dir, device, logger=logger)
+    trainer = BinaryNLITrainer(cfg, run_dir, device, logger=logger, use_mlflow=use_mlflow)
     history, best_f1, best_epoch = trainer.train(model, train_loader, val_loader, class_weights)
 
     # Evaluate on test set
@@ -442,30 +534,62 @@ def main(cfg: DictConfig):
         # Get indices for this criterion
         indices = [i for i, c in enumerate(test_dataset.criterion_names) if c == criterion_name]
 
-            # Extract predictions and labels for this criterion
-            preds = [test_metrics['predictions'][i] for i in indices]
-            labels = [test_metrics['labels'][i] for i in indices]
+        # Extract predictions and labels for this criterion
+        preds = [test_metrics['predictions'][i] for i in indices]
+        labels = [test_metrics['labels'][i] for i in indices]
 
-            # Compute metrics
-            acc = accuracy_score(labels, preds)
-            prec, rec, f1, _ = precision_recall_fscore_support(
-                labels, preds, average='binary', pos_label=1, zero_division=0
-            )
+        # Compute metrics
+        acc = accuracy_score(labels, preds)
+        prec, rec, f1, _ = precision_recall_fscore_support(
+            labels, preds, average='binary', pos_label=1, zero_division=0
+        )
 
-            criterion_results[criterion_name] = {
-                'accuracy': float(acc),
-                'precision': float(prec),
-                'recall': float(rec),
-                'f1': float(f1),
-                'num_samples': len(indices),
-                'num_matched': sum(labels),
-            }
+        criterion_results[criterion_name] = {
+            'accuracy': float(acc),
+            'precision': float(prec),
+            'recall': float(rec),
+            'f1': float(f1),
+            'num_samples': len(indices),
+            'num_matched': sum(labels),
+        }
 
     # Log and save per-criterion results
     criterion_df = pd.DataFrame(criterion_results).T
     criterion_df = criterion_df.sort_values('f1', ascending=False)
     logger.info(f"\n{criterion_df}")
     criterion_df.to_csv(run_dir / 'per_criterion_results.csv')
+
+    # Log test metrics and artifacts to MLflow
+    if use_mlflow:
+        # Log overall test metrics
+        mlflow.log_metrics({
+            'test_accuracy': test_metrics['accuracy'],
+            'test_precision': test_metrics['precision'],
+            'test_recall': test_metrics['recall'],
+            'test_f1': test_metrics['f1'],
+            'test_f1_macro': test_metrics['f1_macro'],
+            'test_precision_macro': test_metrics['precision_macro'],
+            'test_recall_macro': test_metrics['recall_macro'],
+        })
+
+        # Log per-criterion test metrics
+        for criterion_name, metrics in criterion_results.items():
+            mlflow.log_metrics({
+                f'test_{criterion_name}_accuracy': metrics['accuracy'],
+                f'test_{criterion_name}_precision': metrics['precision'],
+                f'test_{criterion_name}_recall': metrics['recall'],
+                f'test_{criterion_name}_f1': metrics['f1'],
+            })
+
+        # Log artifacts (results files)
+        mlflow.log_artifact(str(run_dir / 'test_results.json'), artifact_path="results")
+        mlflow.log_artifact(str(run_dir / 'per_criterion_results.csv'), artifact_path="results")
+        mlflow.log_artifact(str(run_dir / 'training.log'), artifact_path="logs")
+        mlflow.log_artifact(str(run_dir / 'config.yaml'), artifact_path="config")
+
+        # End MLflow run
+        mlflow.end_run()
+        logger.info("MLflow run completed and closed")
 
     logger.info(f"\nResults saved to: {run_dir}")
     logger.info("=" * 60)

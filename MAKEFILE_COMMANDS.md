@@ -72,10 +72,8 @@ make help        # Show all available commands
 |---------|-------------|---------------|
 | `make train` | Train with original script (single split) | 1-2 hours |
 | `make train-quick` | Quick test (2 folds, 3 epochs) | 20-40 min |
-| `make train-5fold` | Full 5-fold CV (default: MentaLLaMA) | 3-5 hours |
-| `make train-5fold-mentallama` | 5-fold CV with MentaLLaMA-chat-7B | 3-5 hours |
+| `make train-5fold` | Full 5-fold CV (default: Gemma) | 4-6 hours |
 | `make train-5fold-gemma` | 5-fold CV with Gemma-2-9B | 4-6 hours |
-| `make train-5fold-both` | Train both MentaLLaMA and Gemma sequentially | 7-11 hours |
 
 ### Experiments
 
@@ -237,8 +235,8 @@ make show-results
 
 ### Full Production Run (Original Task)
 ```bash
-make train-5fold-mentallama
-make show-results RUN=outputs/mentallama_5fold/
+make train-5fold-gemma
+make show-results RUN=outputs/gemma_5fold/
 ```
 
 ---

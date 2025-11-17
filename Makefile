@@ -1,7 +1,7 @@
 # Makefile for Gemma Encoder on ReDSM5
 # Usage: make <target>
 
-.PHONY: help install test clean train train-5fold train-5fold-mentallama train-5fold-gemma train-5fold-both train-quick evaluate lint format check-gpu check-hardware nli-test nli-quick nli-train nli-simple nli-predict-interactive nli-predict-demo nli-predict-best nli-train-4090 nli-train-3090 nli-train-low-mem nli-train-cpu nli-train-auto mlflow-ui mlflow-ui-custom mlflow-list mlflow-runs mlflow-clean mlflow-models
+.PHONY: help install test clean train train-5fold train-5fold-gemma train-quick evaluate lint format check-gpu check-hardware nli-test nli-quick nli-train nli-simple nli-predict-interactive nli-predict-demo nli-predict-best nli-train-4090 nli-train-3090 nli-train-low-mem nli-train-cpu nli-train-auto mlflow-ui mlflow-ui-custom mlflow-list mlflow-runs mlflow-clean mlflow-models
 
 # Default target
 .DEFAULT_GOAL := help
@@ -28,17 +28,10 @@ install-dev: ## Install with development dependencies
 train: ## Train with original script (single split)
 	python src/training/train_gemma.py
 
-train-5fold: train-5fold-mentallama ## Alias: run default 5-fold training (MentaLLaMA)
-
-train-5fold-mentallama: ## Train 5-fold CV with MentaLLaMA-chat-7B encoder
-	python src/training/train_gemma_hydra.py output.experiment_name=mentallama_5fold
+train-5fold: train-5fold-gemma ## Alias: run default 5-fold training (Gemma)
 
 train-5fold-gemma: ## Train 5-fold CV with Gemma-2 (unfrozen encoder)
 	python src/training/train_gemma_hydra.py model.name=google/gemma-2-9b model.freeze_encoder=false training.batch_size=2 output.experiment_name=gemma_5fold
-
-train-5fold-both: ## Train 5-fold CV sequentially for MentaLLaMA then Gemma
-	@$(MAKE) train-5fold-mentallama
-	@$(MAKE) train-5fold-gemma
 
 train-quick: ## Quick test (2 folds, 3 epochs)
 	python src/training/train_gemma_hydra.py experiment=quick_test

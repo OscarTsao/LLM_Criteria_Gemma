@@ -12,7 +12,12 @@ This document describes the **NLI-style binary classification** task for DSM-5 c
 - `0` = **unmatched**: Post does NOT exhibit the criterion
 - `1` = **matched**: Post DOES exhibit the criterion
 
-**Dataset**: ReDSM5 transformed into NLI pairs with balanced positive/negative samples
+**Dataset**: ALL posts from ReDSM5 paired with ALL 9 DSM-5 criteria
+
+**Data Coverage**:
+- Uses ALL posts from `posts.csv` (not just annotated ones)
+- Each post paired with ALL 9 criteria → comprehensive exhaustive pairing
+- Ground truth from annotations: status=1 (matched), status=0 or not annotated (unmatched)
 
 ## Key Differences from Original Task
 
@@ -22,7 +27,9 @@ This document describes the **NLI-style binary classification** task for DSM-5 c
 | **Format** | `[CLS] post [SEP]` | `[CLS] post [SEP] criterion [SEP]` |
 | **Labels** | 10 classes (symptom types) | 2 classes (matched/unmatched) |
 | **Task Type** | Multi-class classification | Binary NLI/matching |
-| **# Samples** | ~1,500 posts | ~3,000+ pairs (with negatives) |
+| **# Posts** | ~1,500 annotated posts | ALL posts (complete dataset) |
+| **# Criteria** | 10 symptoms | 9 core DSM-5 criteria |
+| **# Pairs** | ~1,500 | N_posts × 9 (exhaustive pairing) |
 | **Evaluation** | Per-symptom F1 | Binary F1, AUC-ROC |
 
 ## Architecture
@@ -45,34 +52,64 @@ model = GemmaClassifier(
 
 ## Dataset Creation
 
-### Positive Pairs (Matched)
-For each annotation `(post_id, symptom_label)`:
-- Pair the post with its correct criterion description
-- Label: `1` (matched)
+### Exhaustive Pairing Strategy
 
-Example:
+**ALL posts from `posts.csv` are paired with ALL 9 DSM-5 criteria:**
+
+For each post in `posts.csv`:
+- Create 9 pairs: (post, criterion_1), (post, criterion_2), ..., (post, criterion_9)
+- Total pairs: `N_posts × 9`
+
+### Ground Truth Labels
+
+Labels are determined by the annotation status in `annotations.csv`:
+
+1. **Positive (label=1)**: `status=1` in annotations
+   - Annotated as exhibiting this specific criterion
+   - Example: Post about fatigue + FATIGUE criterion → label=1
+
+2. **Negative (label=0)**: `status=0` OR not annotated
+   - **status=0**: Explicitly annotated as NOT exhibiting the criterion
+   - **Not annotated**: No annotation exists for this (post, criterion) pair
+   - Example: Post about fatigue + SUICIDAL_THOUGHTS criterion → label=0
+
+### Pair Examples
+
+**Positive Pair (status=1):**
 ```
 Post: "I feel so tired all the time, no energy to do anything..."
 Criterion: "The patient reports fatigue or loss of energy nearly every day..."
 Label: 1 (matched)
+Pair Type: positive_status1
 ```
 
-### Negative Pairs (Unmatched)
-For each post:
-- Randomly sample a different (incorrect) criterion
-- Label: `0` (unmatched)
+**Negative Pair (status=0):**
+```
+Post: "I feel fine, just a bit stressed with work..."
+Criterion: "The patient reports fatigue or loss of energy nearly every day..."
+Label: 0 (unmatched)
+Pair Type: negative_status0
+```
 
-Example:
+**Negative Pair (not annotated):**
 ```
 Post: "I feel so tired all the time, no energy to do anything..."
 Criterion: "The patient has recurrent thoughts of death or suicidal ideation..."
 Label: 0 (unmatched)
+Pair Type: negative_not_annotated
 ```
 
-### Balancing
-- `negative_ratio=1.0`: Equal positive and negative samples (balanced)
-- `negative_ratio=2.0`: 2x more negatives (realistic imbalance)
-- `negative_ratio=3.0`: 3x more negatives (hard negatives)
+### Dataset Statistics
+
+Typical dataset from ReDSM5:
+- **Total posts**: ~1,484 posts
+- **Total criteria**: 9 DSM-5 criteria
+- **Total pairs**: ~13,356 pairs (1,484 × 9)
+- **Positive pairs**: ~3,000 (status=1 annotations)
+- **Negative pairs**: ~10,356
+  - status=0: ~1,500
+  - Not annotated: ~8,856
+- **Class balance**: ~23% positive, ~77% negative (realistic imbalance)
 
 ## Quick Start
 
@@ -275,17 +312,25 @@ Based on similar NLI tasks and the Gemma Encoder paper:
 
 | Metric | Expected Range | Notes |
 |--------|----------------|-------|
-| **Accuracy** | 75-85% | Depends on negative ratio |
-| **Precision** | 70-80% | Higher with class weights |
-| **Recall** | 70-80% | Balanced dataset helps |
-| **F1** | 70-80% | Primary metric |
-| **AUC-ROC** | 0.80-0.90 | Discrimination ability |
+| **Accuracy** | 75-85% | With realistic class imbalance (~23% positive) |
+| **Precision** | 65-75% | Higher with class weights enabled |
+| **Recall** | 70-80% | Important for detecting true matches |
+| **F1** | 68-78% | Primary metric for imbalanced data |
+| **AUC-ROC** | 0.80-0.90 | Discrimination ability across thresholds |
+
+**Dataset Characteristics**:
+- **Class imbalance**: ~23% positive (status=1), ~77% negative (status=0 + not annotated)
+- **Total pairs**: ~13,356 (1,484 posts × 9 criteria)
+- **Training data**: ~9,349 pairs per fold (70%)
+- **Validation data**: ~2,003 pairs per fold (15%)
+- **Test data**: ~2,003 pairs per fold (15%)
 
 **Factors affecting performance**:
-- `negative_ratio`: Higher ratio (more negatives) is harder
-- `use_short_criteria`: Full criteria provide more signal
-- `freeze_encoder`: Frozen encoder faster but may limit performance
-- Model size: Gemma-9B > Gemma-2B
+- `use_class_weights`: **Critical** for handling class imbalance
+- `use_short_criteria`: Full criteria provide more semantic signal
+- `freeze_encoder`: Frozen encoder is faster but may limit performance
+- Model size: Gemma-9B > Gemma-2B > Gemma-2-2B
+- Class imbalance: Natural 3:1 negative:positive ratio is challenging
 
 ## Output Structure
 
@@ -367,12 +412,13 @@ LLM_Criteria_Gemma/
 
 ## Advanced Usage
 
-### Custom Negative Sampling Strategy
+### Custom Filtering Strategy
 
-Modify `create_nli_pairs()` in `src/data/redsm5_nli_dataset.py` to:
-- Sample hard negatives (similar symptoms)
-- Use all negatives (all 9 incorrect criteria per post)
-- Apply domain-specific sampling
+The current implementation uses exhaustive pairing (all posts × all criteria). You can modify `create_nli_pairs()` in `src/data/redsm5_nli_dataset.py` to:
+- Filter out certain post-criterion pairs based on heuristics
+- Weight certain negative types differently
+- Apply domain-specific filtering rules
+- Sample a subset of pairs for faster experimentation
 
 ### Multi-Task Learning
 
@@ -412,20 +458,31 @@ If you use this NLI-style implementation, please cite:
 ## Troubleshooting
 
 ### Issue: Class imbalance warnings
-**Solution**: Ensure `use_class_weights=true` in config
+**Solution**:
+- Ensure `use_class_weights=true` in config (enabled by default)
+- The dataset has natural ~3:1 negative:positive imbalance
+- Class weights help the model handle this imbalance
 
 ### Issue: Out of memory
 **Solution**:
-- Reduce `batch_size`
-- Use `freeze_encoder=true`
-- Enable `use_gradient_checkpointing=true`
+- Reduce `batch_size` (try 4 or 2)
+- Use `freeze_encoder=true` (enabled by default)
+- Enable `use_gradient_checkpointing=true` (enabled by default)
 - Use shorter criteria (`use_short_criteria=true`)
+- Use gradient accumulation for effective larger batch size
 
 ### Issue: Poor performance on negatives
 **Solution**:
-- Increase `negative_ratio` during training
-- Use hard negative sampling
-- Ensure criterion descriptions are distinct
+- Verify `use_class_weights=true` is enabled
+- Check that status=0 annotations are being used correctly
+- Ensure the model sees sufficient negative examples during training
+- Consider using focal loss or other imbalance-aware loss functions
+
+### Issue: Dataset creation takes a long time
+**Solution**:
+- Creating ~13,356 pairs (1,484 posts × 9 criteria) is expected
+- This is a one-time operation, results are cached in CSV files
+- Subsequent runs load from the cached CSV files
 
 ### Issue: Tokenizer doesn't support text pairs
 **Solution**: The code uses `tokenizer(text1, text2, ...)` which automatically handles text-pair encoding for all HuggingFace tokenizers.

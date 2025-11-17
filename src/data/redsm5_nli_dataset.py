@@ -24,7 +24,7 @@ from .dsm5_criteria import get_criterion_text, DSM5_CRITERIA
 NUM_CLASSES = 2
 LABEL_NAMES = ['unmatched', 'matched']
 
-# Original symptom labels (for reference)
+# Original symptom labels (9 core DSM-5 criteria)
 SYMPTOM_LABELS = [
     'DEPRESSED_MOOD',
     'ANHEDONIA',
@@ -35,7 +35,6 @@ SYMPTOM_LABELS = [
     'WORTHLESSNESS',
     'COGNITIVE_ISSUES',
     'SUICIDAL_THOUGHTS',
-    'SPECIAL_CASE',
 ]
 
 
@@ -109,14 +108,18 @@ def create_nli_pairs(
     random_seed: int = 42,
 ) -> pd.DataFrame:
     """
-    Create NLI-style (post, criterion, label) pairs from annotations.
+    Create NLI-style (post, criterion, label) pairs from ALL posts and annotations.
+
+    Uses all posts from posts.csv paired with all 9 criteria:
+    - Positive pairs (label=1): annotations with status=1
+    - Negative pairs (label=0): annotations with status=0 OR posts not annotated for that criterion
 
     Args:
         posts_df: DataFrame with columns [post_id, text]
-        annotations_df: DataFrame with columns [post_id, symptom_label]
-        negative_ratio: Ratio of negative to positive samples (1.0 = balanced)
+        annotations_df: DataFrame with columns [post_id, symptom_label, status]
+        negative_ratio: Ratio of negative to positive samples (for additional sampling)
         use_short_criteria: Whether to use short criterion descriptions
-        random_seed: Random seed for negative sampling
+        random_seed: Random seed for reproducibility
 
     Returns:
         DataFrame with columns [post_id, post_text, criterion_text, label, symptom_label]
@@ -126,63 +129,70 @@ def create_nli_pairs(
 
     pairs = []
 
-    # Merge posts with annotations
-    merged_df = pd.merge(annotations_df, posts_df, on='post_id', how='inner')
+    # Create annotation lookup: {(post_id, symptom): status}
+    annotation_lookup = {}
+    for _, row in annotations_df.iterrows():
+        key = (row['post_id'], row['symptom_label'])
+        annotation_lookup[key] = row['status']
 
-    # Create positive pairs (post matches its annotated criterion)
-    for _, row in merged_df.iterrows():
-        post_id = row['post_id']
-        post_text = row['text']
-        symptom_label = row['symptom_label']
+    # Process ALL posts with ALL 9 criteria
+    for _, post_row in posts_df.iterrows():
+        post_id = post_row['post_id']
+        post_text = post_row['text']
 
-        # Get criterion text for the annotated symptom
-        criterion_text = get_criterion_text(symptom_label, use_short=use_short_criteria)
+        # Pair this post with each of the 9 criteria
+        for symptom_label in SYMPTOM_LABELS:
+            criterion_text = get_criterion_text(symptom_label, use_short=use_short_criteria)
 
-        pairs.append({
-            'post_id': post_id,
-            'post_text': post_text,
-            'criterion_text': criterion_text,
-            'label': 1,  # matched
-            'symptom_label': symptom_label,
-            'pair_type': 'positive'
-        })
+            # Check annotation status
+            key = (post_id, symptom_label)
+            status = annotation_lookup.get(key, None)
 
-    num_positives = len(pairs)
+            # Determine label based on status
+            if status == 1:
+                # Positive pair: post exhibits this criterion
+                label = 1
+                pair_type = 'positive_status1'
+            elif status == 0:
+                # Negative pair: explicitly marked as not exhibiting
+                label = 0
+                pair_type = 'negative_status0'
+            else:
+                # Not annotated for this criterion - treat as negative
+                label = 0
+                pair_type = 'negative_not_annotated'
 
-    # Create negative pairs (post paired with incorrect criteria)
-    num_negatives = int(num_positives * negative_ratio)
-
-    for i in range(num_negatives):
-        # Sample a random annotation
-        row = merged_df.sample(n=1, random_state=random_seed + i).iloc[0]
-        post_id = row['post_id']
-        post_text = row['text']
-        true_symptom = row['symptom_label']
-
-        # Sample a different symptom (incorrect criterion)
-        other_symptoms = [s for s in SYMPTOM_LABELS if s != true_symptom]
-        false_symptom = random.choice(other_symptoms)
-
-        criterion_text = get_criterion_text(false_symptom, use_short=use_short_criteria)
-
-        pairs.append({
-            'post_id': post_id,
-            'post_text': post_text,
-            'criterion_text': criterion_text,
-            'label': 0,  # unmatched
-            'symptom_label': false_symptom,
-            'pair_type': 'negative'
-        })
+            pairs.append({
+                'post_id': post_id,
+                'post_text': post_text,
+                'criterion_text': criterion_text,
+                'label': label,
+                'symptom_label': symptom_label,
+                'pair_type': pair_type,
+                'status': status if status is not None else -1,
+            })
 
     pairs_df = pd.DataFrame(pairs)
+
+    # Count different types
+    num_positives = len(pairs_df[pairs_df['label'] == 1])
+    num_negatives_status0 = len(pairs_df[pairs_df['pair_type'] == 'negative_status0'])
+    num_negatives_not_annotated = len(pairs_df[pairs_df['pair_type'] == 'negative_not_annotated'])
+    num_total_negatives = len(pairs_df[pairs_df['label'] == 0])
 
     # Shuffle pairs
     pairs_df = pairs_df.sample(frac=1, random_state=random_seed).reset_index(drop=True)
 
-    print(f"Created {len(pairs_df)} NLI pairs:")
-    print(f"  Positive (matched): {num_positives}")
-    print(f"  Negative (unmatched): {num_negatives}")
-    print(f"  Balance ratio: {num_negatives / num_positives:.2f}")
+    num_posts = len(posts_df)
+    num_criteria = len(SYMPTOM_LABELS)
+
+    print(f"Created {len(pairs_df)} NLI pairs from {num_posts} posts × {num_criteria} criteria:")
+    print(f"  Positive (status=1): {num_positives}")
+    print(f"  Negative (status=0): {num_negatives_status0}")
+    print(f"  Negative (not annotated): {num_negatives_not_annotated}")
+    print(f"  Total negatives: {num_total_negatives}")
+    print(f"  Total pairs: {len(pairs_df)}")
+    print(f"  Balance: {num_total_negatives}/{num_positives} = {num_total_negatives/num_positives:.2f}:1")
 
     return pairs_df
 

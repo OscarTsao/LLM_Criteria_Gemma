@@ -1,11 +1,11 @@
 """
 DSM-5 Depression Criteria Descriptions
 
-Text descriptions of DSM-5 Major Depressive Disorder criteria for NLI-style matching.
+Text descriptions of the 9 core DSM-5 Major Depressive Disorder criteria for NLI-style matching.
 Based on DSM-5 diagnostic criteria for Major Depressive Episode.
 """
 
-# Map symptom labels to their DSM-5 criterion descriptions
+# Map symptom labels to their DSM-5 criterion descriptions (9 core criteria)
 DSM5_CRITERIA = {
     'DEPRESSED_MOOD': (
         "The patient exhibits a depressed mood most of the day, nearly every day, "
@@ -49,10 +49,6 @@ DSM5_CRITERIA = {
         "The patient has recurrent thoughts of death, recurrent suicidal ideation without a "
         "specific plan, or a suicide attempt or a specific plan for committing suicide."
     ),
-    'SPECIAL_CASE': (
-        "The patient's presentation requires expert clinical judgment to determine if it "
-        "represents a depressive symptom. This includes ambiguous or complex cases."
-    ),
 }
 
 
@@ -67,7 +63,6 @@ DSM5_CRITERIA_SHORT = {
     'WORTHLESSNESS': "Feelings of worthlessness or excessive guilt.",
     'COGNITIVE_ISSUES': "Diminished ability to think or concentrate.",
     'SUICIDAL_THOUGHTS': "Recurrent thoughts of death or suicidal ideation.",
-    'SPECIAL_CASE': "Complex case requiring expert clinical judgment.",
 }
 
 

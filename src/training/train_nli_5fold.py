@@ -371,10 +371,13 @@ def main(cfg: DictConfig):
                 with open(metadata_path) as f:
                     metadata = json.load(f)
                     tracker.log_params({
-                        'dataset/total_pairs': metadata.get('total_pairs', 0),
-                        'dataset/positive_pairs': metadata.get('positive_pairs', 0),
-                        'dataset/negative_pairs': metadata.get('negative_pairs', 0),
-                        'dataset/num_criteria': metadata.get('num_criteria', 10),
+                        'dataset/total_pairs': metadata.get('total_samples', 0),
+                        'dataset/num_posts': metadata.get('num_posts', 0),
+                        'dataset/num_criteria': metadata.get('num_criteria', 9),
+                        'dataset/positive_pairs': metadata.get('num_positive', 0),
+                        'dataset/negative_pairs': metadata.get('num_negative', 0),
+                        'dataset/negative_status0': metadata.get('num_negative_status0', 0),
+                        'dataset/negative_not_annotated': metadata.get('num_negative_not_annotated', 0),
                     })
 
             # Log configuration as artifact

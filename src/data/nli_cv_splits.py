@@ -69,11 +69,23 @@ def create_nli_cv_splits(
         random_state=random_seed
     )
 
+    # Compute overall statistics
+    num_positive = int(pairs_df['label'].sum())
+    num_negative = int((pairs_df['label'] == 0).sum())
+    num_status0 = len(pairs_df[pairs_df['pair_type'] == 'negative_status0'])
+    num_not_annotated = len(pairs_df[pairs_df['pair_type'] == 'negative_not_annotated'])
+    num_posts = len(posts_df)
+    num_criteria = len(pairs_df['symptom_label'].unique())
+
     fold_info = {
         'num_folds': num_folds,
         'total_samples': len(pairs_df),
-        'num_positive': int(pairs_df['label'].sum()),
-        'num_negative': int((pairs_df['label'] == 0).sum()),
+        'num_posts': num_posts,
+        'num_criteria': num_criteria,
+        'num_positive': num_positive,
+        'num_negative': num_negative,
+        'num_negative_status0': num_status0,
+        'num_negative_not_annotated': num_not_annotated,
         'negative_ratio': negative_ratio,
         'use_short_criteria': use_short_criteria,
         'random_seed': random_seed,

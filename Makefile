@@ -1,7 +1,7 @@
 # Makefile for Gemma Encoder on ReDSM5
 # Usage: make <target>
 
-.PHONY: help install test clean train train-5fold train-5fold-mentallama train-5fold-gemma train-5fold-both train-quick evaluate lint format check-gpu
+.PHONY: help install test clean train train-5fold train-5fold-gemma train-quick evaluate lint format check-gpu check-hardware nli-test nli-quick nli-train nli-simple nli-predict-interactive nli-predict-demo nli-predict-best nli-train-4090 nli-train-3090 nli-train-low-mem nli-train-cpu nli-train-auto mlflow-ui mlflow-ui-custom mlflow-list mlflow-runs mlflow-clean mlflow-models
 
 # Default target
 .DEFAULT_GOAL := help
@@ -16,6 +16,9 @@ help: ## Display this help message
 install: ## Install dependencies
 	pip install -r requirements.txt
 
+install-viz: ## Install visualization dependencies only
+	pip install rich>=13.0.0 plotext>=5.2.0
+
 install-dev: ## Install with development dependencies
 	pip install -r requirements.txt
 	pip install pytest black flake8 mypy
@@ -25,17 +28,10 @@ install-dev: ## Install with development dependencies
 train: ## Train with original script (single split)
 	python src/training/train_gemma.py
 
-train-5fold: train-5fold-mentallama ## Alias: run default 5-fold training (MentaLLaMA)
-
-train-5fold-mentallama: ## Train 5-fold CV with MentaLLaMA-chat-7B encoder
-	python src/training/train_gemma_hydra.py output.experiment_name=mentallama_5fold
+train-5fold: train-5fold-gemma ## Alias: run default 5-fold training (Gemma)
 
 train-5fold-gemma: ## Train 5-fold CV with Gemma-2 (unfrozen encoder)
 	python src/training/train_gemma_hydra.py model.name=google/gemma-2-9b model.freeze_encoder=false training.batch_size=2 output.experiment_name=gemma_5fold
-
-train-5fold-both: ## Train 5-fold CV sequentially for MentaLLaMA then Gemma
-	@$(MAKE) train-5fold-mentallama
-	@$(MAKE) train-5fold-gemma
 
 train-quick: ## Quick test (2 folds, 3 epochs)
 	python src/training/train_gemma_hydra.py experiment=quick_test
@@ -48,6 +44,177 @@ train-attention: ## Train with attention pooling
 
 train-10fold: ## Train with 10-fold CV
 	python src/training/train_gemma_hydra.py cv.num_folds=10
+
+##@ NLI Binary Classification
+
+nli-test: ## Test NLI dataset creation and text-pair formatting
+	python scripts/test_nli_dataset.py
+
+nli-quick: ## Quick NLI test (2 folds, 3 epochs)
+	python src/training/train_nli_5fold.py experiment=nli_quick_test
+
+nli-train: ## Full NLI 5-fold CV training (production)
+	python src/training/train_nli_5fold.py experiment=nli_full_5fold
+
+nli-imbalanced: ## NLI with imbalanced data (3:1 negative:positive)
+	python src/training/train_nli_5fold.py experiment=nli_imbalanced
+
+nli-simple: ## Simple NLI training (single split, no CV)
+	python src/training/train_nli_simple.py \
+		--data_dir data/redsm5 \
+		--model_name google/gemma-2-2b \
+		--batch_size 8 \
+		--epochs 10 \
+		--output_dir outputs/nli_simple \
+		--freeze_encoder
+
+nli-gemma-2b: ## NLI 5-fold CV with Gemma-2B
+	python src/training/train_nli_5fold.py \
+		model.name=google/gemma-2-2b \
+		training.batch_size=8 \
+		output.experiment_name=nli_gemma2b_5fold
+
+nli-gemma-9b: ## NLI 5-fold CV with Gemma-9B
+	python src/training/train_nli_5fold.py \
+		model.name=google/gemma-2-9b \
+		training.batch_size=4 \
+		output.experiment_name=nli_gemma9b_5fold
+
+nli-short-criteria: ## NLI with short criterion descriptions
+	python src/training/train_nli_5fold.py \
+		data.use_short_criteria=true \
+		output.experiment_name=nli_short_criteria
+
+nli-full-criteria: ## NLI with full criterion descriptions
+	python src/training/train_nli_5fold.py \
+		data.use_short_criteria=false \
+		output.experiment_name=nli_full_criteria
+
+nli-unfreeze: ## NLI with unfrozen encoder (full fine-tuning)
+	python src/training/train_nli_5fold.py \
+		model.freeze_encoder=false \
+		training.batch_size=2 \
+		training.num_epochs=10 \
+		output.experiment_name=nli_unfrozen
+
+nli-pooling-mean: ## NLI with mean pooling
+	python src/training/train_nli_5fold.py \
+		model.pooling_strategy=mean \
+		output.experiment_name=nli_pooling_mean
+
+nli-pooling-attention: ## NLI with attention pooling
+	python src/training/train_nli_5fold.py \
+		model.pooling_strategy=attention \
+		output.experiment_name=nli_pooling_attention
+
+nli-ablation-pooling: ## NLI pooling strategy ablation study
+	@echo "Running pooling ablation study for NLI..."
+	@for pooler in mean cls max attention; do \
+		echo "Training NLI with $$pooler pooling..."; \
+		python src/training/train_nli_5fold.py \
+			model.pooling_strategy=$$pooler \
+			output.experiment_name=nli_ablation_$$pooler \
+			experiment=nli_quick_test; \
+	done
+	@echo "NLI pooling ablation complete. Check outputs/nli_ablation_*/"
+
+nli-ablation-negatives: ## NLI negative ratio ablation study
+	@echo "Running negative ratio ablation study..."
+	@for ratio in 0.5 1.0 2.0 3.0; do \
+		echo "Training NLI with negative_ratio=$$ratio..."; \
+		python src/training/train_nli_5fold.py \
+			data.negative_ratio=$$ratio \
+			output.experiment_name=nli_neg_$$ratio \
+			experiment=nli_quick_test; \
+	done
+	@echo "Negative ratio ablation complete. Check outputs/nli_neg_*/"
+
+nli-show-results: ## Show NLI aggregate results from latest run
+	@python -c "import json; \
+		from pathlib import Path; \
+		import glob; \
+		results_files = sorted(glob.glob('outputs/nli_*/aggregate_results.json')); \
+		if results_files: \
+			latest = results_files[-1]; \
+			print(f'Latest NLI results: {latest}'); \
+			with open(latest) as f: \
+				r = json.load(f); \
+				print(f'\n5-Fold CV Results:'); \
+				print(f'  Mean F1:  {r[\"mean_f1\"]:.4f} ± {r[\"std_f1\"]:.4f}'); \
+				print(f'  Mean AUC: {r[\"mean_auc\"]:.4f} ± {r[\"std_auc\"]:.4f}'); \
+				print(f'\nPer-Fold Results:'); \
+				for fold in r['fold_results']: \
+					print(f'  Fold {fold[\"fold\"]}: F1={fold[\"best_val_f1\"]:.4f}, AUC={fold[\"best_val_auc\"]:.4f}'); \
+		else: \
+			print('No NLI results found. Run make nli-train first.')"
+
+nli-quickstart: ## Complete NLI quick start workflow
+	@echo "═══════════════════════════════════════"
+	@echo "NLI Binary Classification Quick Start"
+	@echo "═══════════════════════════════════════"
+	@echo ""
+	@echo "Step 1: Testing NLI dataset creation..."
+	@$(MAKE) nli-test
+	@echo ""
+	@echo "Step 2: Running quick training (2 folds, 3 epochs)..."
+	@$(MAKE) nli-quick
+	@echo ""
+	@echo "Step 3: Showing results..."
+	@$(MAKE) nli-show-results
+	@echo ""
+	@echo "✓ Quick start complete!"
+	@echo "  For full training: make nli-train"
+	@echo "  For documentation: cat README_NLI.md"
+
+##@ Inference & Prediction
+
+nli-predict-interactive: ## Interactive NLI prediction (requires CHECKPOINT)
+	@if [ -z "$(CHECKPOINT)" ]; then \
+		echo "Error: CHECKPOINT not specified"; \
+		echo "Usage: make nli-predict-interactive CHECKPOINT=path/to/model.pt"; \
+		exit 1; \
+	fi
+	python src/inference/predict_nli.py --checkpoint $(CHECKPOINT) --mode interactive
+
+nli-predict-demo: ## Run prediction demo with examples (requires CHECKPOINT)
+	@if [ -z "$(CHECKPOINT)" ]; then \
+		echo "Error: CHECKPOINT not specified"; \
+		echo "Usage: make nli-predict-demo CHECKPOINT=path/to/model.pt"; \
+		exit 1; \
+	fi
+	python src/inference/predict_nli.py --checkpoint $(CHECKPOINT) --mode demo
+
+nli-predict-batch: ## Batch prediction from file (requires CHECKPOINT, FILE, CRITERION)
+	@if [ -z "$(CHECKPOINT)" ] || [ -z "$(FILE)" ] || [ -z "$(CRITERION)" ]; then \
+		echo "Error: Missing required arguments"; \
+		echo "Usage: make nli-predict-batch CHECKPOINT=path/to/model.pt FILE=posts.txt CRITERION=DEPRESSED_MOOD"; \
+		exit 1; \
+	fi
+	python src/inference/predict_nli.py --checkpoint $(CHECKPOINT) --mode batch --post_file $(FILE) --criterion $(CRITERION)
+
+nli-predict-best: ## Interactive prediction with best model from latest run
+	@RUN_DIR=$$(for dir in $$(ls -td outputs/nli_*/ 2>/dev/null); do \
+		if [ -f "$${dir}fold_1_best.pt" ]; then echo $$dir; fi; \
+	done | head -n 1); \
+	if [ -z "$$RUN_DIR" ]; then \
+		echo "No trained NLI model found. Run 'make nli-train' first."; \
+		exit 1; \
+	fi; \
+	CHECKPOINT="$${RUN_DIR%/}/fold_1_best.pt"; \
+	echo "Using checkpoint: $$CHECKPOINT"; \
+	python src/inference/predict_nli.py --checkpoint "$$CHECKPOINT" --mode interactive
+
+nli-demo-best: ## Run prediction demo with best model from latest run
+	@RUN_DIR=$$(for dir in $$(ls -td outputs/nli_*/ 2>/dev/null); do \
+		if [ -f "$${dir}fold_1_best.pt" ]; then echo $$dir; fi; \
+	done | head -n 1); \
+	if [ -z "$$RUN_DIR" ]; then \
+		echo "No trained NLI model found. Run 'make nli-train' first."; \
+		exit 1; \
+	fi; \
+	CHECKPOINT="$${RUN_DIR%/}/fold_1_best.pt"; \
+	echo "Using checkpoint: $$CHECKPOINT"; \
+	python src/inference/predict_nli.py --checkpoint "$$CHECKPOINT" --mode demo
 
 ##@ Evaluation
 
@@ -187,6 +354,49 @@ check-env: ## Check Python environment
 	@echo "\nInstalled packages:"
 	@pip list | grep -E "(torch|transformers|hydra|pandas|numpy|scikit-learn)" || echo "Key packages not found"
 
+check-hardware: ## Detailed hardware information with recommendations
+	python -c "from src.utils.hardware_optimizer import print_hardware_info; print_hardware_info()"
+
+##@ Hardware-Optimized Training
+
+nli-train-4090: ## NLI training optimized for RTX 4090 (24GB)
+	python src/training/train_nli_5fold.py \
+		hardware=gpu_4090 \
+		output.experiment_name=nli_4090_optimized
+
+nli-train-3090: ## NLI training optimized for RTX 3090 (24GB)
+	python src/training/train_nli_5fold.py \
+		hardware=gpu_3090 \
+		output.experiment_name=nli_3090_optimized
+
+nli-train-low-mem: ## NLI training for low-memory GPUs (8-12GB)
+	python src/training/train_nli_5fold.py \
+		hardware=gpu_low_mem \
+		output.experiment_name=nli_low_mem
+
+nli-train-cpu: ## NLI training on CPU (very slow, not recommended)
+	python src/training/train_nli_5fold.py \
+		hardware=cpu \
+		output.experiment_name=nli_cpu
+
+nli-train-auto: ## NLI training with automatic hardware detection
+	@echo "Detecting hardware and applying optimal settings..."
+	@python -c "from src.utils.hardware_optimizer import detect_gpu_info, get_recommended_config; \
+		info = detect_gpu_info(); \
+		config = get_recommended_config(); \
+		if not info['has_gpu']: \
+			print('WARNING: No GPU detected. Training on CPU will be very slow.'); \
+			print('Use: make nli-train-cpu'); \
+		elif info['gpu_memory_gb'] >= 22: \
+			print(f\"Detected high-end GPU: {info['gpu_name']} ({info['gpu_memory_gb']:.1f}GB)\"); \
+			print('Recommended: make nli-train-4090'); \
+		elif info['gpu_memory_gb'] >= 18: \
+			print(f\"Detected mid-high GPU: {info['gpu_name']} ({info['gpu_memory_gb']:.1f}GB)\"); \
+			print('Recommended: make nli-train-3090'); \
+		else: \
+			print(f\"Detected low-memory GPU: {info['gpu_name']} ({info['gpu_memory_gb']:.1f}GB)\"); \
+			print('Recommended: make nli-train-low-mem')"
+
 ##@ Documentation
 
 docs: ## Open documentation in browser
@@ -216,6 +426,84 @@ watch-training: ## Watch training logs in real-time
 		tail -f outputs/training.log; \
 	else \
 		echo "No training log found"; \
+	fi
+
+##@ MLflow Tracking
+
+mlflow-ui: ## Launch MLflow UI
+	@if [ -d mlruns ]; then \
+		echo "Starting MLflow UI at http://localhost:5000"; \
+		mlflow ui --port 5000; \
+	else \
+		echo "No MLflow runs found. Train a model first."; \
+	fi
+
+mlflow-ui-custom: ## Launch MLflow UI on custom port (use PORT=xxxx)
+	@PORT=$${PORT:-5000}; \
+	if [ -d mlruns ]; then \
+		echo "Starting MLflow UI at http://localhost:$$PORT"; \
+		mlflow ui --port $$PORT; \
+	else \
+		echo "No MLflow runs found. Train a model first."; \
+	fi
+
+mlflow-list: ## List all MLflow experiments
+	@if [ -d mlruns ]; then \
+		python -c "import mlflow; \
+			client = mlflow.tracking.MlflowClient(); \
+			exps = client.search_experiments(); \
+			print('MLflow Experiments:'); \
+			for exp in exps: \
+				print(f'  {exp.experiment_id}: {exp.name}')"; \
+	else \
+		echo "No MLflow runs found"; \
+	fi
+
+mlflow-runs: ## Show recent MLflow runs
+	@if [ -d mlruns ]; then \
+		python -c "import mlflow; \
+			import pandas as pd; \
+			client = mlflow.tracking.MlflowClient(); \
+			exps = client.search_experiments(); \
+			for exp in exps: \
+				if exp.name != 'Default': \
+					runs = client.search_runs(exp.experiment_id, max_results=10); \
+					if runs: \
+						print(f'\n{exp.name}:'); \
+						for run in runs: \
+							metrics = run.data.metrics; \
+							f1 = metrics.get('cv_aggregate/mean_f1', metrics.get('test_f1', 'N/A')); \
+							print(f'  {run.info.run_id[:8]}... {run.info.run_name}: F1={f1}')"; \
+	else \
+		echo "No MLflow runs found"; \
+	fi
+
+mlflow-clean: ## Clean MLflow runs (BE CAREFUL!)
+	@echo "WARNING: This will delete all MLflow tracking data!"
+	@echo "Press Ctrl+C to cancel, or Enter to continue..."
+	@read confirm
+	rm -rf mlruns/
+	@echo "MLflow data cleaned"
+
+mlflow-models: ## List registered models
+	@if [ -d mlruns ]; then \
+		python -c "import mlflow; \
+			from mlflow.tracking import MlflowClient; \
+			client = MlflowClient(); \
+			try: \
+				models = client.search_registered_models(); \
+				if models: \
+					print('Registered Models:'); \
+					for model in models: \
+						print(f'  {model.name}'); \
+						for version in model.latest_versions: \
+							print(f'    v{version.version}: {version.current_stage}'); \
+				else: \
+					print('No registered models found'); \
+			except: \
+				print('Model registry not available')"; \
+	else \
+		echo "No MLflow runs found"; \
 	fi
 
 ##@ Experiments
@@ -264,16 +552,105 @@ info: ## Show project information
 	@echo "  • Bidirectional attention (decoder → encoder)"
 	@echo "  • 6 pooling strategies (mean, cls, max, attention, etc.)"
 	@echo "  • 5-fold cross-validation with Hydra"
-	@echo "  • Expected F1: 0.72-0.75"
+	@echo "  • Two task modes: Multi-class & NLI Binary"
 	@echo ""
-	@echo "Quick Start:"
+	@echo "Task 1: Original Multi-Class Classification"
+	@echo "  Input:  Single text (post)"
+	@echo "  Output: Symptom class (0-9)"
+	@echo "  F1:     0.72-0.75"
+	@echo ""
+	@echo "Task 2: NLI Binary Criteria Matching (NEW)"
+	@echo "  Input:  [CLS] post [SEP] criterion [SEP]"
+	@echo "  Output: Binary (matched/unmatched)"
+	@echo "  F1:     0.70-0.80"
+	@echo ""
+	@echo "Quick Start - Original Task:"
 	@echo "  make install          # Install dependencies"
 	@echo "  make train-quick      # Quick test (30 min)"
 	@echo "  make train-5fold      # Full 5-fold CV (2-3 hours)"
 	@echo ""
-	@echo "For more info: make help"
+	@echo "Quick Start - NLI Task:"
+	@echo "  make nli-quickstart   # Complete NLI workflow"
+	@echo "  make nli-quick        # Quick NLI test"
+	@echo "  make nli-train        # Full NLI 5-fold CV"
+	@echo ""
+	@echo "Documentation:"
+	@echo "  README.md             # Original task"
+	@echo "  README_NLI.md         # NLI task"
+	@echo "  make help             # All commands"
 
 version: ## Show version information
 	@echo "Project: Gemma Encoder for ReDSM5"
 	@echo "Version: 0.1.0"
 	@grep -E "^__version__" src/__init__.py 2>/dev/null || echo "Version: Not set"
+
+##@ NLI Documentation
+
+nli-docs: ## Show NLI documentation
+	@cat README_NLI.md
+
+nli-summary: ## Show NLI refactoring summary
+	@cat REFACTORING_SUMMARY.md
+
+##@ Quick Reference
+
+.PHONY: ref
+ref: ## Quick reference card
+	@echo "═══════════════════════════════════════════════════════════"
+	@echo "  GEMMA ENCODER - QUICK REFERENCE"
+	@echo "═══════════════════════════════════════════════════════════"
+	@echo ""
+	@echo "SETUP:"
+	@echo "  make install          Install dependencies"
+	@echo "  make check-data       Verify dataset files"
+	@echo "  make check-gpu        Check GPU availability"
+	@echo ""
+	@echo "ORIGINAL TASK (Multi-class):"
+	@echo "  make train-quick      Quick test (2 folds)"
+	@echo "  make train-5fold      Full 5-fold CV"
+	@echo "  make show-results     Show latest results"
+	@echo ""
+	@echo "NLI TASK (Binary):"
+	@echo "  make nli-test         Test NLI dataset"
+	@echo "  make nli-quick        Quick NLI (2 folds)"
+	@echo "  make nli-train        Full NLI 5-fold CV"
+	@echo "  make nli-show-results Show NLI results"
+	@echo "  make nli-quickstart   Complete NLI workflow"
+	@echo ""
+	@echo "NLI VARIATIONS:"
+	@echo "  make nli-gemma-2b     NLI with Gemma-2B"
+	@echo "  make nli-gemma-9b     NLI with Gemma-9B"
+	@echo "  make nli-imbalanced   Imbalanced data (3:1)"
+	@echo "  make nli-unfreeze     Unfreeze encoder"
+	@echo ""
+	@echo "HARDWARE-OPTIMIZED:"
+	@echo "  make check-hardware   Show hardware info & recommendations"
+	@echo "  make nli-train-auto   Auto-detect optimal settings"
+	@echo "  make nli-train-4090   RTX 4090 optimized (24GB)"
+	@echo "  make nli-train-3090   RTX 3090 optimized (24GB)"
+	@echo "  make nli-train-low-mem Low-memory GPUs (8-12GB)"
+	@echo ""
+	@echo "INFERENCE:"
+	@echo "  make nli-predict-best       Interactive prediction (latest model)"
+	@echo "  make nli-demo-best          Demo with examples (latest model)"
+	@echo "  make nli-predict-interactive CHECKPOINT=path/to/model.pt"
+	@echo "  make nli-predict-demo       CHECKPOINT=path/to/model.pt"
+	@echo ""
+	@echo "EXPERIMENTS:"
+	@echo "  make nli-ablation-pooling   Pooling strategies"
+	@echo "  make nli-ablation-negatives Negative ratios"
+	@echo "  make exp-pooling-comparison Original pooling"
+	@echo ""
+	@echo "MLFLOW TRACKING:"
+	@echo "  make mlflow-ui          Launch MLflow UI"
+	@echo "  make mlflow-list        List experiments"
+	@echo "  make mlflow-runs        Show recent runs"
+	@echo "  make mlflow-models      List registered models"
+	@echo ""
+	@echo "UTILITIES:"
+	@echo "  make clean            Clean cache files"
+	@echo "  make test             Run tests"
+	@echo "  make format           Format code"
+	@echo "  make info             Project info"
+	@echo "  make help             All commands"
+	@echo "═══════════════════════════════════════════════════════════"

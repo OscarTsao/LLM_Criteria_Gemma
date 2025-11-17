@@ -1,0 +1,24 @@
+# @package _global_
+
+# Optimized configuration for CPU-only training (not recommended for production)
+
+model:
+  use_gradient_checkpointing: false  # CPU has RAM
+
+training:
+  batch_size: 2  # Very small for CPU
+  num_workers: 4  # Use all CPU cores
+  pin_memory: false  # Not applicable for CPU
+  prefetch_factor: 2
+
+device:
+  use_cuda: false
+  mixed_precision: false  # CPU doesn't support bfloat16 well
+  cudnn_benchmark: false
+  cudnn_deterministic: false
+  tf32: false
+
+optimization:
+  gradient_accumulation_steps: 8  # Simulate batch_size=16
+  max_grad_norm: 1.0
+  compile: false  # May not work on all CPUs

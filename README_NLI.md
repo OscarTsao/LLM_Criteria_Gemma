@@ -1,0 +1,492 @@
+# NLI-Style Binary Criteria Matching with Gemma Encoder
+
+This document describes the **NLI-style binary classification** task for DSM-5 criteria matching, refactored from the original multi-class symptom classification.
+
+## Overview
+
+**Task**: Binary classification of (post, criterion) pairs
+
+**Input Format**: `[CLS] post [SEP] criterion [SEP]` (NSP/NLI-style text pairs)
+
+**Output**: Binary label
+- `0` = **unmatched**: Post does NOT exhibit the criterion
+- `1` = **matched**: Post DOES exhibit the criterion
+
+**Dataset**: ALL posts from ReDSM5 paired with ALL 9 DSM-5 criteria
+
+**Data Coverage**:
+- Uses ALL posts from `posts.csv` (not just annotated ones)
+- Each post paired with ALL 9 criteria → comprehensive exhaustive pairing
+- Ground truth from annotations: status=1 (matched), status=0 or not annotated (unmatched)
+
+## Key Differences from Original Task
+
+| Aspect | Original Task | NLI Task |
+|--------|--------------|----------|
+| **Input** | Single text (post only) | Text pair (post + criterion) |
+| **Format** | `[CLS] post [SEP]` | `[CLS] post [SEP] criterion [SEP]` |
+| **Labels** | 10 classes (symptom types) | 2 classes (matched/unmatched) |
+| **Task Type** | Multi-class classification | Binary NLI/matching |
+| **# Posts** | ~1,500 annotated posts | ALL posts (complete dataset) |
+| **# Criteria** | 10 symptoms | 9 core DSM-5 criteria |
+| **# Pairs** | ~1,500 | N_posts × 9 (exhaustive pairing) |
+| **Evaluation** | Per-symptom F1 | Binary F1, AUC-ROC |
+
+## Architecture
+
+The model architecture remains the same as the paper:
+- **Encoder**: Gemma decoder with bidirectional attention
+- **Pooling**: Mean pooling (or others)
+- **Classifier**: 2-class head (binary: unmatched/matched)
+
+```python
+from src.models.gemma_encoder import GemmaClassifier
+
+model = GemmaClassifier(
+    num_classes=2,  # Binary classification
+    model_name="google/gemma-2-2b",
+    pooling_strategy="mean",
+    freeze_encoder=True,
+)
+```
+
+## Dataset Creation
+
+### Exhaustive Pairing Strategy
+
+**ALL posts from `posts.csv` are paired with ALL 9 DSM-5 criteria:**
+
+For each post in `posts.csv`:
+- Create 9 pairs: (post, criterion_1), (post, criterion_2), ..., (post, criterion_9)
+- Total pairs: `N_posts × 9`
+
+### Ground Truth Labels
+
+Labels are determined by the annotation status in `annotations.csv`:
+
+1. **Positive (label=1)**: `status=1` in annotations
+   - Annotated as exhibiting this specific criterion
+   - Example: Post about fatigue + FATIGUE criterion → label=1
+
+2. **Negative (label=0)**: `status=0` OR not annotated
+   - **status=0**: Explicitly annotated as NOT exhibiting the criterion
+   - **Not annotated**: No annotation exists for this (post, criterion) pair
+   - Example: Post about fatigue + SUICIDAL_THOUGHTS criterion → label=0
+
+### Pair Examples
+
+**Positive Pair (status=1):**
+```
+Post: "I feel so tired all the time, no energy to do anything..."
+Criterion: "The patient reports fatigue or loss of energy nearly every day..."
+Label: 1 (matched)
+Pair Type: positive_status1
+```
+
+**Negative Pair (status=0):**
+```
+Post: "I feel fine, just a bit stressed with work..."
+Criterion: "The patient reports fatigue or loss of energy nearly every day..."
+Label: 0 (unmatched)
+Pair Type: negative_status0
+```
+
+**Negative Pair (not annotated):**
+```
+Post: "I feel so tired all the time, no energy to do anything..."
+Criterion: "The patient has recurrent thoughts of death or suicidal ideation..."
+Label: 0 (unmatched)
+Pair Type: negative_not_annotated
+```
+
+### Dataset Statistics
+
+Typical dataset from ReDSM5:
+- **Total posts**: ~1,484 posts
+- **Total criteria**: 9 DSM-5 criteria
+- **Total pairs**: ~13,356 pairs (1,484 × 9)
+- **Positive pairs**: ~3,000 (status=1 annotations)
+- **Negative pairs**: ~10,356
+  - status=0: ~1,500
+  - Not annotated: ~8,856
+- **Class balance**: ~23% positive, ~77% negative (realistic imbalance)
+
+## Quick Start
+
+### 1. Test Dataset Creation
+
+```bash
+python scripts/test_nli_dataset.py
+```
+
+This will:
+- Verify criterion text loading
+- Create NLI pairs from ReDSM5 data
+- Show examples of positive/negative pairs
+- Test tokenization with text-pair format
+
+### 2. Simple Training (Single Split)
+
+```bash
+python src/training/train_nli_simple.py \
+  --data_dir data/redsm5 \
+  --model_name google/gemma-2-2b \
+  --batch_size 8 \
+  --epochs 10 \
+  --output_dir outputs/nli_simple \
+  --freeze_encoder
+```
+
+### 3. Full 5-Fold Cross-Validation
+
+```bash
+# Quick test (2 folds, 3 epochs)
+python src/training/train_nli_5fold.py experiment=nli_quick_test
+
+# Full 5-fold CV
+python src/training/train_nli_5fold.py experiment=nli_full_5fold
+
+# Imbalanced dataset (3:1 negative:positive)
+python src/training/train_nli_5fold.py experiment=nli_imbalanced
+```
+
+### 4. Custom Configuration
+
+```bash
+python src/training/train_nli_5fold.py \
+  model.name=google/gemma-2-9b \
+  training.batch_size=4 \
+  data.negative_ratio=2.0 \
+  data.use_short_criteria=false
+```
+
+## Configuration
+
+Edit `conf/config_nli.yaml` or use command-line overrides:
+
+```yaml
+model:
+  name: google/gemma-2-2b
+  pooling_strategy: mean
+  freeze_encoder: true
+
+training:
+  num_epochs: 20
+  batch_size: 8
+  learning_rate: 2e-5
+  use_class_weights: true  # Important for balance
+
+data:
+  negative_ratio: 1.0  # 1.0 = balanced
+  use_short_criteria: false  # false = full descriptions
+
+cv:
+  num_folds: 5
+```
+
+## Hardware Optimization
+
+The repository includes automatic hardware detection and optimization for different GPU configurations:
+
+### Quick Start
+
+```bash
+# Check your hardware and get recommendations
+make check-hardware
+
+# Automatic hardware detection
+make nli-train-auto
+
+# Or use a specific GPU profile:
+make nli-train-4090      # RTX 4090 (24GB)
+make nli-train-3090      # RTX 3090 (24GB)
+make nli-train-low-mem   # Low-memory GPUs (8-12GB)
+```
+
+### Hardware-Specific Configurations
+
+**RTX 4090 / A6000 (24GB VRAM)**
+- Batch size: 16
+- Gradient checkpointing: Disabled
+- Compile: Enabled (torch.compile)
+- Expected: ~15-20 samples/sec
+
+**RTX 3090 (24GB VRAM)**
+- Batch size: 12
+- Gradient checkpointing: Disabled
+- Expected: ~12-18 samples/sec
+
+**Low-Memory GPUs (8-12GB VRAM)**
+- Batch size: 4
+- Gradient checkpointing: Enabled
+- Gradient accumulation: 4 steps (effective batch size: 16)
+- Expected: ~6-10 samples/sec
+
+### Automatic Optimizations
+
+The hardware optimizer automatically applies:
+- ✅ **Mixed precision (bfloat16)** - 2x faster training
+- ✅ **TF32 on Ampere GPUs** - Up to 8x faster matmul
+- ✅ **cuDNN benchmark mode** - Auto-tunes algorithms
+- ✅ **Optimal DataLoader workers** - Based on GPU memory
+- ✅ **Model compilation** - 10-30% speedup (PyTorch 2.0+)
+
+### Manual Override
+
+```bash
+python src/training/train_nli_5fold.py \
+    hardware=gpu_4090 \
+    training.batch_size=20 \
+    optimization.compile=true
+```
+
+**See [HARDWARE_OPTIMIZATION.md](HARDWARE_OPTIMIZATION.md) for complete guide.**
+
+## MLflow Experiment Tracking
+
+Full MLflow tracking is integrated for comprehensive experiment management:
+
+### Quick Start
+
+```bash
+# Training with MLflow (enabled by default)
+make nli-train
+
+# View results in MLflow UI
+make mlflow-ui
+```
+
+Then open http://localhost:5000 to visualize and compare experiments.
+
+### What Gets Tracked
+
+**Automatically logged:**
+- ✅ All hyperparameters (batch_size, learning_rate, etc.)
+- ✅ Hardware information (GPU, memory, capabilities)
+- ✅ Dataset metadata (pairs, criteria, splits)
+- ✅ Training metrics per epoch (loss, F1, AUC, etc.)
+- ✅ Per-fold results (for 5-fold CV)
+- ✅ Aggregate cross-validation metrics
+- ✅ Model checkpoints and artifacts
+- ✅ Configuration files
+
+### MLflow Commands
+
+```bash
+make mlflow-ui          # Launch MLflow UI
+make mlflow-list        # List all experiments
+make mlflow-runs        # Show recent runs
+make mlflow-models      # List registered models
+```
+
+### Model Registry
+
+Best models are automatically registered to MLflow Model Registry:
+- Model versioning
+- Stage management (staging/production)
+- Model lineage tracking
+
+**See [MLFLOW_TRACKING.md](MLFLOW_TRACKING.md) for complete guide.**
+
+## DSM-5 Criteria Descriptions
+
+The repository includes two versions of DSM-5 criterion texts:
+
+### Full Descriptions (`use_short_criteria=false`)
+```python
+DEPRESSED_MOOD: "The patient exhibits a depressed mood most of the day,
+nearly every day, as indicated by subjective report or observation by others.
+This includes feeling sad, empty, or hopeless."
+```
+
+### Short Descriptions (`use_short_criteria=true`)
+```python
+DEPRESSED_MOOD: "Depressed mood most of the day, nearly every day."
+```
+
+**Recommendation**: Use full descriptions for better semantic matching, unless constrained by sequence length.
+
+## Expected Results
+
+Based on similar NLI tasks and the Gemma Encoder paper:
+
+| Metric | Expected Range | Notes |
+|--------|----------------|-------|
+| **Accuracy** | 75-85% | With realistic class imbalance (~23% positive) |
+| **Precision** | 65-75% | Higher with class weights enabled |
+| **Recall** | 70-80% | Important for detecting true matches |
+| **F1** | 68-78% | Primary metric for imbalanced data |
+| **AUC-ROC** | 0.80-0.90 | Discrimination ability across thresholds |
+
+**Dataset Characteristics**:
+- **Class imbalance**: ~23% positive (status=1), ~77% negative (status=0 + not annotated)
+- **Total pairs**: ~13,356 (1,484 posts × 9 criteria)
+- **Training data**: ~9,349 pairs per fold (70%)
+- **Validation data**: ~2,003 pairs per fold (15%)
+- **Test data**: ~2,003 pairs per fold (15%)
+
+**Factors affecting performance**:
+- `use_class_weights`: **Critical** for handling class imbalance
+- `use_short_criteria`: Full criteria provide more semantic signal
+- `freeze_encoder`: Frozen encoder is faster but may limit performance
+- Model size: Gemma-9B > Gemma-2B > Gemma-2-2B
+- Class imbalance: Natural 3:1 negative:positive ratio is challenging
+
+## Output Structure
+
+After training, outputs are organized as:
+
+```
+outputs/nli_full_5fold/
+├── config.yaml                    # Saved configuration
+├── cv_folds/                      # Cross-validation splits
+│   ├── nli_pairs_full.csv         # All NLI pairs
+│   ├── fold_1_train.csv           # Fold 1 training data
+│   ├── fold_1_val.csv             # Fold 1 validation data
+│   ├── fold_2_train.csv
+│   ├── fold_2_val.csv
+│   ├── ...
+│   └── nli_cv_folds_metadata.json # Fold statistics
+├── fold_1_best.pt                 # Best model for fold 1
+├── fold_1_history.json            # Training history fold 1
+├── fold_2_best.pt
+├── fold_2_history.json
+├── ...
+└── aggregate_results.json         # Cross-validation summary
+```
+
+### Aggregate Results Example
+
+```json
+{
+  "fold_results": [
+    {"fold": 1, "best_val_f1": 0.7654, "best_val_auc": 0.8421},
+    {"fold": 2, "best_val_f1": 0.7801, "best_val_auc": 0.8567},
+    ...
+  ],
+  "mean_f1": 0.7728,
+  "std_f1": 0.0123,
+  "mean_auc": 0.8494,
+  "std_auc": 0.0089
+}
+```
+
+## File Structure
+
+```
+LLM_Criteria_Gemma/
+├── src/
+│   ├── data/
+│   │   ├── dsm5_criteria.py           # NEW: Criterion descriptions
+│   │   ├── redsm5_nli_dataset.py      # NEW: NLI dataset & pair creation
+│   │   └── nli_cv_splits.py           # NEW: 5-fold CV for NLI
+│   ├── training/
+│   │   ├── train_nli_simple.py        # NEW: Simple training script
+│   │   └── train_nli_5fold.py         # NEW: 5-fold CV training
+│   └── models/
+│       ├── gemma_encoder.py           # Unchanged (supports binary)
+│       └── poolers.py                 # Unchanged
+├── conf/
+│   ├── config_nli.yaml                # NEW: NLI task config
+│   └── experiment/
+│       ├── nli_quick_test.yaml        # NEW: Quick test config
+│       ├── nli_full_5fold.yaml        # NEW: Full 5-fold config
+│       └── nli_imbalanced.yaml        # NEW: Imbalanced data config
+├── scripts/
+│   └── test_nli_dataset.py            # NEW: Dataset verification
+└── README_NLI.md                      # This file
+```
+
+## Comparison with Paper
+
+| Component | Paper | This Implementation |
+|-----------|-------|---------------------|
+| **Architecture** | Gemma Encoder (bidirectional) | ✓ Implemented |
+| **Pooling** | Mean, First-K, Last-K, Attention | ✓ Implemented |
+| **Tasks Tested** | GLUE (SST-2, MNLI, QQP, etc.) | **NLI-style criteria matching** |
+| **Input Format** | Text pairs for NLI tasks | ✓ `[CLS] post [SEP] criterion [SEP]` |
+| **Loss** | CrossEntropyLoss | ✓ With class weights |
+| **Evaluation** | GLUE metrics | ✓ Binary F1, AUC |
+
+**Alignment**: This NLI implementation **now matches the paper's methodology** for NLI-style tasks (like MNLI). The original multi-class task was a single-text classification task (like SST-2).
+
+## Advanced Usage
+
+### Custom Filtering Strategy
+
+The current implementation uses exhaustive pairing (all posts × all criteria). You can modify `create_nli_pairs()` in `src/data/redsm5_nli_dataset.py` to:
+- Filter out certain post-criterion pairs based on heuristics
+- Weight certain negative types differently
+- Apply domain-specific filtering rules
+- Sample a subset of pairs for faster experimentation
+
+### Multi-Task Learning
+
+Extend to jointly train on:
+- Binary matching (matched/unmatched)
+- Symptom classification (which symptom)
+- Severity prediction (mild/moderate/severe)
+
+### Ensemble Methods
+
+Train multiple folds and ensemble predictions:
+```python
+# Average probabilities from all 5 folds
+ensemble_probs = np.mean([fold1_probs, fold2_probs, ...], axis=0)
+```
+
+## Citation
+
+If you use this NLI-style implementation, please cite:
+
+```bibtex
+@article{suganthan2025gemma,
+  title={Adapting Decoder-Based Language Models for Diverse Encoder Downstream Tasks},
+  author={Suganthan, Paul and Moiseev, Fedor and others},
+  journal={arXiv preprint arXiv:2503.02656},
+  year={2025}
+}
+
+@article{bao2025redsm5,
+  title={ReDSM5: A Reddit Dataset for DSM-5 Depression Detection},
+  author={Bao, Eliseo and Pérez, Anxo and Parapar, Javier},
+  journal={arXiv preprint arXiv:2508.03399},
+  year={2025}
+}
+```
+
+## Troubleshooting
+
+### Issue: Class imbalance warnings
+**Solution**:
+- Ensure `use_class_weights=true` in config (enabled by default)
+- The dataset has natural ~3:1 negative:positive imbalance
+- Class weights help the model handle this imbalance
+
+### Issue: Out of memory
+**Solution**:
+- Reduce `batch_size` (try 4 or 2)
+- Use `freeze_encoder=true` (enabled by default)
+- Enable `use_gradient_checkpointing=true` (enabled by default)
+- Use shorter criteria (`use_short_criteria=true`)
+- Use gradient accumulation for effective larger batch size
+
+### Issue: Poor performance on negatives
+**Solution**:
+- Verify `use_class_weights=true` is enabled
+- Check that status=0 annotations are being used correctly
+- Ensure the model sees sufficient negative examples during training
+- Consider using focal loss or other imbalance-aware loss functions
+
+### Issue: Dataset creation takes a long time
+**Solution**:
+- Creating ~13,356 pairs (1,484 posts × 9 criteria) is expected
+- This is a one-time operation, results are cached in CSV files
+- Subsequent runs load from the cached CSV files
+
+### Issue: Tokenizer doesn't support text pairs
+**Solution**: The code uses `tokenizer(text1, text2, ...)` which automatically handles text-pair encoding for all HuggingFace tokenizers.
+
+## License
+
+Apache 2.0 (following ReDSM5 dataset license)

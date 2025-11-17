@@ -1,0 +1,25 @@
+# @package _global_
+
+# Optimized configuration for NVIDIA RTX 4090 (24GB VRAM)
+# Based on arXiv:2503.02656 and PyTorch best practices
+
+model:
+  use_gradient_checkpointing: false  # 4090 has enough memory
+
+training:
+  batch_size: 16  # Optimal for 24GB VRAM with frozen encoder
+  num_workers: 8   # 4090 works well with 8 workers
+  pin_memory: true
+  prefetch_factor: 2
+
+device:
+  use_cuda: true
+  mixed_precision: true  # bfloat16 for Ampere architecture
+  cudnn_benchmark: true  # Enable cuDNN auto-tuner
+  cudnn_deterministic: false  # Faster, non-deterministic
+  tf32: true  # Enable TF32 for Ampere GPUs
+
+optimization:
+  gradient_accumulation_steps: 1  # No need with large batch size
+  max_grad_norm: 1.0
+  compile: true  # torch.compile for 2.0+

@@ -438,10 +438,9 @@ def main(cfg: DictConfig):
     logger.info("=" * 60)
 
     criterion_results = {}
-    for criterion_name in test_dataset.criterion_names:
-        if criterion_name not in criterion_results:
-            # Get indices for this criterion
-            indices = [i for i, c in enumerate(test_dataset.criterion_names) if c == criterion_name]
+    for criterion_name in set(test_dataset.criterion_names):
+        # Get indices for this criterion
+        indices = [i for i, c in enumerate(test_dataset.criterion_names) if c == criterion_name]
 
             # Extract predictions and labels for this criterion
             preds = [test_metrics['predictions'][i] for i in indices]

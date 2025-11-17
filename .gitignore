@@ -41,9 +41,8 @@ outputs/
 *.bin
 *.safetensors
 
-# Data
-data/
-*.csv
+# Data (keep outputs and large processed files ignored)
+outputs/
 *.json.gz
 *.parquet
 

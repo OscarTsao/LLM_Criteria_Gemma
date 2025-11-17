@@ -69,7 +69,7 @@ data/redsm5/
 
 ### 2. Train Model
 ```bash
-python src/training/train_gemma.py
+python src/training/train_gemma_hydra.py
 ```
 
 ### 3. Evaluate
@@ -92,7 +92,7 @@ LLM_Criteria_Gemma/
 │   ├── data/
 │   │   └── redsm5_dataset.py     # Dataset loaders
 │   ├── training/
-│   │   ├── train_gemma.py        # Training script
+│   │   ├── train_gemma_hydra.py  # Training script with Hydra config
 │   │   └── evaluate.py           # Evaluation script
 ├── conf/
 │   ├── config.yaml               # Hydra defaults

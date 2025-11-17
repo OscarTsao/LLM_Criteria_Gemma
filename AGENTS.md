@@ -17,8 +17,8 @@
 - Use lowercase, hyphenated names for new Hydra experiments (`conf/experiment/pooling-mean.yaml`) and snake_case for Python identifiers.
 
 ## Testing Guidelines
-- Add pytest suites under `tests/`, mirroring the `src/` package layout (e.g., `tests/training/test_train_gemma.py`).
-- Favor lightweight fixtures that reuse `data/redsm5/` samples and verify both CLI entry points (`train_gemma.py`, `train_gemma_hydra.py`).
+- Add pytest suites under `tests/`, mirroring the `src/` package layout (e.g., `tests/training/test_train_gemma_hydra.py`).
+- Favor lightweight fixtures that reuse `data/redsm5/` samples and verify the CLI entry point (`train_gemma_hydra.py`).
 - Run `make test` for the full pass; `make test-data` and `make test-models` provide quick import checks before long trainings.
 
 ## Commit & Pull Request Guidelines

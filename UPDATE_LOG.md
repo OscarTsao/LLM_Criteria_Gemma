@@ -94,9 +94,9 @@ outputs/
 
 ## Backward Compatibility
 
-✅ Original training script still works:
+✅ Training script with Hydra configuration:
 ```bash
-python src/training/train_gemma.py
+python src/training/train_gemma_hydra.py
 ```
 
 ✅ All existing code unchanged:

@@ -22,8 +22,8 @@ install-dev: ## Install with development dependencies
 
 ##@ Training
 
-train: ## Train with original script (single split)
-	python src/training/train_gemma.py
+train: ## Train with default configuration
+	python src/training/train_gemma_hydra.py
 
 train-5fold: ## Train 5-fold CV with google/gemma-3-4b-it encoder
 	python src/training/train_gemma_hydra.py model.name=google/gemma-3-4b-it output.experiment_name=gemma3_it_5fold

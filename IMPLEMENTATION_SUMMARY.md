@@ -54,12 +54,12 @@ The paper systematically evaluated:
    - Maps 10 DSM-5 symptoms to class indices
 
 ### Training & Evaluation
-4. **`src/training/train_gemma.py`** (250+ lines)
-   - `GemmaTrainer`: Training loop with progress tracking
+4. **`src/training/train_gemma_hydra.py`** (400+ lines)
+   - `FoldTrainer`: Training loop with cross-validation support
    - AdamW optimizer + linear warmup schedule
-   - Gradient clipping
-   - Best model checkpointing
-   - Training history logging
+   - Gradient clipping and mixed precision training
+   - Best model checkpointing with early stopping
+   - Training history logging and Hydra configuration
 
 5. **`src/training/evaluate.py`** (200+ lines)
    - GLUE-style evaluation metrics
@@ -147,7 +147,7 @@ Labels: 0 (absent) or 1 (present)
 ### 1. Train Model
 ```bash
 cd /path/to/LLM_Criteria_Gemma
-python src/training/train_gemma.py
+python src/training/train_gemma_hydra.py
 ```
 
 ### 2. Evaluate Model
@@ -237,8 +237,8 @@ LLM_Criteria_Gemma/
 │   │   └── redsm5_dataset.py   # ✓ Dataset loaders
 │   ├── training/
 │   │   ├── __init__.py
-│   │   ├── train_gemma.py      # ✓ Training script
-│   │   └── evaluate.py         # ✓ Evaluation script
+│   │   ├── train_gemma_hydra.py # ✓ Training script with Hydra config
+│   │   └── evaluate.py          # ✓ Evaluation script
 │   ├── config/
 │   │   └── config.yaml         # ✓ Configuration
 │   └── utils/
@@ -325,7 +325,7 @@ LLM_Criteria_Gemma/
 ✅ **Completed**:
 - Research and design
 - Data pipeline (redsm5_dataset.py)
-- Training script (train_gemma.py)
+- Training script (train_gemma_hydra.py)
 - Evaluation script (evaluate.py)
 - Configuration (config.yaml)
 - Documentation (README.md)

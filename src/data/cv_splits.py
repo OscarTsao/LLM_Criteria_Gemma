@@ -8,7 +8,7 @@ import pandas as pd
 import numpy as np
 from sklearn.model_selection import StratifiedKFold
 from pathlib import Path
-from typing import List, Dict, Tuple, Optional
+from typing import List, Dict, Optional, Tuple
 import json
 
 from .redsm5_dataset import ReDSM5Dataset, SYMPTOM_LABELS, NUM_CLASSES

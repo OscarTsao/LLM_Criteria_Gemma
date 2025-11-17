@@ -10,7 +10,6 @@ from transformers import AutoTokenizer
 from sklearn.metrics import (
     accuracy_score,
     precision_recall_fscore_support,
-    classification_report,
     confusion_matrix
 )
 import numpy as np
@@ -22,7 +21,6 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 
 import sys
-import os
 sys.path.append(str(Path(__file__).parent.parent))
 
 from models.gemma_encoder import GemmaClassifier

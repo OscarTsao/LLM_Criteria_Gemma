@@ -119,6 +119,9 @@ class LinearWithDoRA(nn.Module):
         """Forward pass with DoRA-adapted weights."""
         # Get adapted weight
         adapted_weight = self.dora(self.base_layer.weight)
+        # Ensure dtype matches base layer for backend compatibility (e.g., bf16)
+        if adapted_weight.dtype != self.base_layer.weight.dtype:
+            adapted_weight = adapted_weight.to(self.base_layer.weight.dtype)
 
         # Apply linear transformation with adapted weight
         output = F.linear(x, adapted_weight, self.base_layer.bias)

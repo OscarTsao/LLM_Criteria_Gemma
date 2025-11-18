@@ -33,6 +33,7 @@ data:
   random_seed: 42
   test_size: 0.15  # 15% of data for final test set
   val_size: 0.15   # 15% of remaining data for validation
+  post_limit: null  # Limit number of posts (None = use all)
 
 # Cross-validation configuration
 cv:
@@ -57,6 +58,15 @@ logging:
 device:
   use_cuda: true
   mixed_precision: true  # Use bfloat16 (no GradScaler needed)
+
+# Runtime fallbacks for constrained environments (e.g., CPU-only)
+runtime:
+  cpu_debug_mode: true          # Enable automatic downscaling when CUDA unavailable
+  cpu_post_limit: 2             # Number of posts to keep during CPU debug mode
+  cpu_num_epochs: 1             # Cap epochs for CPU debug mode
+  cpu_batch_size: 1             # Safer batch size for CPU debug mode
+  force_hf_offline: true        # Skip Hugging Face network calls when offline
+  cpu_max_length: 256           # Reduce sequence length for CPU debug mode
 
 # MLflow configuration
 mlflow:

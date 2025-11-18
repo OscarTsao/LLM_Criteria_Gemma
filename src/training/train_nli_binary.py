@@ -29,6 +29,7 @@ import json
 from datetime import datetime
 from tqdm.auto import tqdm
 import sys
+import os
 import mlflow
 import mlflow.pytorch
 
@@ -263,13 +264,14 @@ class BinaryNLITrainer:
                 # Log model to MLflow (second part of dual saving)
                 if self.use_mlflow:
                     # Create input example for model signature
+                    input_example = None
                     try:
                         sample_batch = next(iter(val_loader))
-                        input_example = (
-                            sample_batch['input_ids'][:1].to(self.device),
-                            sample_batch['attention_mask'][:1].to(self.device)
-                        )
-                    except:
+                        input_example = {
+                            'input_ids': sample_batch['input_ids'][:1].cpu().numpy(),
+                            'attention_mask': sample_batch['attention_mask'][:1].cpu().numpy(),
+                        }
+                    except StopIteration:
                         input_example = None
 
                     # Log the model artifact
@@ -346,10 +348,58 @@ def main(cfg: DictConfig):
     # Log configuration
     log_experiment_config(logger, OmegaConf.to_container(cfg, resolve=True))
 
+    if cfg.runtime.get('force_hf_offline', False):
+        os.environ.setdefault('HF_HUB_OFFLINE', '1')
+        os.environ.setdefault('TRANSFORMERS_OFFLINE', '1')
+        logger.info("HF_HUB_OFFLINE=1 enforced (offline mode).")
+
     # Setup device
     device = 'cuda' if cfg.device.use_cuda and torch.cuda.is_available() else 'cpu'
     logger.info(f"Device: {device}")
     logger.info(f"Run directory: {run_dir}")
+
+    cpu_debug_mode = (
+        device == 'cpu'
+        and cfg.runtime.get('cpu_debug_mode', False)
+    )
+    if cpu_debug_mode:
+        logger.warning(
+            "CUDA requested but unavailable; enabling CPU debug mode with reduced workload."
+        )
+        # Limit dataset size for faster turnaround
+        post_limit = cfg.runtime.get('cpu_post_limit')
+        if post_limit:
+            current_limit = cfg.data.get('post_limit')
+            if current_limit is None or current_limit > post_limit:
+                cfg.data.post_limit = post_limit
+                logger.warning(f"Limiting dataset to {post_limit} posts for CPU run.")
+        # Cap epochs and batch size
+        max_cpu_epochs = cfg.runtime.get('cpu_num_epochs')
+        if max_cpu_epochs:
+            original_epochs = cfg.training.num_epochs
+            cfg.training.num_epochs = min(cfg.training.num_epochs, max_cpu_epochs)
+            if cfg.training.num_epochs != original_epochs:
+                logger.warning(f"Reducing epochs from {original_epochs} to {cfg.training.num_epochs}.")
+        cpu_batch_size = cfg.runtime.get('cpu_batch_size')
+        if cpu_batch_size:
+            original_bs = cfg.training.batch_size
+            cfg.training.batch_size = min(cfg.training.batch_size, cpu_batch_size)
+            if cfg.training.batch_size != original_bs:
+                logger.warning(f"Reducing batch size from {original_bs} to {cfg.training.batch_size}.")
+        cpu_max_length = cfg.runtime.get('cpu_max_length')
+        if cpu_max_length:
+            original_max_len = cfg.data.max_length
+            cfg.data.max_length = min(cfg.data.max_length, cpu_max_length)
+            if cfg.data.max_length != original_max_len:
+                logger.warning(f"Reducing max token length from {original_max_len} to {cfg.data.max_length}.")
+        # Simplify split ratios so tiny subsets still produce train/val/test
+        original_test_size = cfg.data.test_size
+        cfg.data.test_size = min(cfg.data.test_size, 0.5)
+        if cfg.data.test_size != original_test_size:
+            logger.warning(f"Reducing test_size from {original_test_size} to {cfg.data.test_size}.")
+        if cfg.data.val_size > 0:
+            logger.warning(f"Setting val_size from {cfg.data.val_size} to 0.0 for CPU debug mode.")
+            cfg.data.val_size = 0.0
 
     # Save configuration
     with open(run_dir / 'config.yaml', 'w') as config_file:
@@ -357,7 +407,10 @@ def main(cfg: DictConfig):
 
     # Load tokenizer
     logger.info(f"Loading tokenizer: {cfg.model.name}")
-    tokenizer = AutoTokenizer.from_pretrained(cfg.model.name)
+    tokenizer = AutoTokenizer.from_pretrained(
+        cfg.model.name,
+        local_files_only=cfg.runtime.get('force_hf_offline', False),
+    )
 
     # Load NLI dataset
     logger.info("Loading ReDSM5 NLI dataset...")
@@ -369,6 +422,7 @@ def main(cfg: DictConfig):
         test_size=cfg.data.test_size,
         val_size=cfg.data.val_size,
         random_seed=cfg.data.random_seed,
+        post_limit=cfg.data.get('post_limit'),
     )
 
     # Show dataset statistics
@@ -426,6 +480,7 @@ def main(cfg: DictConfig):
         dora_rank=cfg.model.get('dora_rank', 16),
         dora_alpha=cfg.model.get('dora_alpha', 32.0),
         dora_dropout=cfg.model.get('dora_dropout', 0.05),
+        local_files_only=cfg.runtime.get('force_hf_offline', False),
     )
 
     # Get class weights
@@ -502,7 +557,7 @@ def main(cfg: DictConfig):
     logger.info("=" * 60)
 
     # Load best model
-    checkpoint = torch.load(run_dir / 'best_model.pt')
+    checkpoint = torch.load(run_dir / 'best_model.pt', weights_only=False)
     model.load_state_dict(checkpoint['model_state_dict'])
 
     # Evaluate

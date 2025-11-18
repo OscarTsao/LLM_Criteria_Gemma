@@ -31,6 +31,7 @@ class GemmaEncoder(nn.Module):
         dora_rank: int = 16,
         dora_alpha: float = 32.0,
         dora_dropout: float = 0.05,
+        local_files_only: bool = False,
     ):
         super().__init__()
         self.model_name = model_name
@@ -42,6 +43,7 @@ class GemmaEncoder(nn.Module):
             torch_dtype=torch.bfloat16,
             device_map=self.device,
             trust_remote_code=True,
+            local_files_only=local_files_only,
         )
         self._get_text_config().use_cache = False
 
@@ -78,7 +80,11 @@ class GemmaEncoder(nn.Module):
             except Exception as e:
                 logger.warning(f"Could not enable gradient checkpointing: {e}")
 
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
+        self.tokenizer = AutoTokenizer.from_pretrained(
+            model_name,
+            trust_remote_code=True,
+            local_files_only=local_files_only,
+        )
         hidden_size = self._get_text_config().hidden_size
 
         # Initialize pooler
@@ -199,6 +205,7 @@ class GemmaClassifier(nn.Module):
         dora_rank: int = 16,
         dora_alpha: float = 32.0,
         dora_dropout: float = 0.05,
+        local_files_only: bool = False,
     ):
         super().__init__()
         self.num_classes = num_classes
@@ -214,6 +221,7 @@ class GemmaClassifier(nn.Module):
             dora_rank=dora_rank,
             dora_alpha=dora_alpha,
             dora_dropout=dora_dropout,
+            local_files_only=local_files_only,
         )
 
         hidden_size = self.encoder._get_text_config().hidden_size

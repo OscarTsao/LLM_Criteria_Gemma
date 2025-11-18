@@ -2,11 +2,15 @@
 # Quick test experiment with fewer epochs and fewer folds
 
 training:
-  num_epochs: 3
-  batch_size: 8
+  num_epochs: 1
+  batch_size: 4
 
 cv:
   num_folds: 2
 
 output:
   experiment_name: quick_test
+
+data:
+  post_limit: 64
+  max_length: 256

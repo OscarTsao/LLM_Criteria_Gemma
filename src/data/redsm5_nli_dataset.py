@@ -155,6 +155,7 @@ def load_redsm5_nli(
     test_size: float = 0.15,
     val_size: float = 0.15,
     random_seed: int = 42,
+    post_limit: Optional[int] = None,
 ) -> Tuple[ReDSM5NLIDataset, ReDSM5NLIDataset, ReDSM5NLIDataset]:
     """
     Load ReDSM5 dataset for binary NLI criteria matching task.
@@ -172,6 +173,7 @@ def load_redsm5_nli(
         test_size: Proportion for test set (by unique posts)
         val_size: Proportion for validation set (by unique posts)
         random_seed: Random seed for reproducibility
+        post_limit: Optional cap on the number of unique posts (useful for debug)
 
     Returns:
         Tuple of (train_dataset, val_dataset, test_dataset)
@@ -197,6 +199,14 @@ def load_redsm5_nli(
     # Group pairs by post_id
     unique_post_ids = posts_df['post_id'].unique()
 
+    if post_limit is not None and post_limit > 0:
+        if post_limit < len(unique_post_ids):
+            rng = np.random.default_rng(random_seed)
+            unique_post_ids = rng.choice(unique_post_ids, size=post_limit, replace=False)
+        else:
+            # If limit larger than dataset, just use all posts
+            post_limit = None
+
     # Split post IDs into train/val/test
     train_post_ids, test_post_ids = train_test_split(
         unique_post_ids,
@@ -204,12 +214,15 @@ def load_redsm5_nli(
         random_state=random_seed,
     )
 
-    val_ratio = val_size / (1 - test_size)
-    train_post_ids, val_post_ids = train_test_split(
-        train_post_ids,
-        test_size=val_ratio,
-        random_state=random_seed,
-    )
+    if val_size <= 0:
+        val_post_ids = np.array([], dtype=train_post_ids.dtype)
+    else:
+        val_ratio = val_size / (1 - test_size)
+        train_post_ids, val_post_ids = train_test_split(
+            train_post_ids,
+            test_size=val_ratio,
+            random_state=random_seed,
+        )
 
     # Convert to sets for fast lookup
     train_post_set = set(train_post_ids)
@@ -245,7 +258,8 @@ def load_redsm5_nli(
     for split_name, dataset in [('Train', train_dataset), ('Val', val_dataset), ('Test', test_dataset)]:
         n_matched = sum(dataset.labels)
         n_total = len(dataset.labels)
-        print(f"  {split_name} balance: {n_matched}/{n_total} matched ({100*n_matched/n_total:.1f}%)")
+        match_pct = 100 * n_matched / n_total if n_total else 0.0
+        print(f"  {split_name} balance: {n_matched}/{n_total} matched ({match_pct:.1f}%)")
 
     return train_dataset, val_dataset, test_dataset
 

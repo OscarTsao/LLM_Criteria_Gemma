@@ -32,6 +32,7 @@ class GemmaEncoder(nn.Module):
         dora_alpha: float = 32.0,
         dora_dropout: float = 0.05,
         local_files_only: bool = False,
+        use_flash_attention: bool = True,
     ):
         super().__init__()
         self.model_name = model_name
@@ -46,6 +47,16 @@ class GemmaEncoder(nn.Module):
             local_files_only=local_files_only,
         )
         self._get_text_config().use_cache = False
+
+        # Enable Flash Attention via SDPA if requested
+        if use_flash_attention and torch.cuda.is_available():
+            try:
+                torch.backends.cuda.enable_flash_sdp(True)
+                torch.backends.cuda.enable_mem_efficient_sdp(True)
+                torch.backends.cuda.enable_math_sdp(False)  # Force Flash/Mem-efficient
+                logger.info("SDPA Flash Attention backend enabled")
+            except Exception as e:
+                logger.warning(f"Could not enable Flash Attention: {e}")
 
         # Enable bidirectional attention (critical for encoder tasks)
         self._enable_bidirectional_attention()
@@ -206,6 +217,7 @@ class GemmaClassifier(nn.Module):
         dora_alpha: float = 32.0,
         dora_dropout: float = 0.05,
         local_files_only: bool = False,
+        use_flash_attention: bool = True,
     ):
         super().__init__()
         self.num_classes = num_classes
@@ -222,6 +234,7 @@ class GemmaClassifier(nn.Module):
             dora_alpha=dora_alpha,
             dora_dropout=dora_dropout,
             local_files_only=local_files_only,
+            use_flash_attention=use_flash_attention,
         )
 
         hidden_size = self.encoder._get_text_config().hidden_size

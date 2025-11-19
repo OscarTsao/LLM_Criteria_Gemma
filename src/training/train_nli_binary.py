@@ -41,6 +41,7 @@ from data.redsm5_nli_dataset import (
     load_redsm5_nli, get_class_weights,
     get_label_distribution, get_criterion_distribution
 )
+from data.length_bucketing import LengthBucketSampler, collate_fn_dynamic_padding
 from utils.logger import setup_logger, log_experiment_config
 
 # Binary classification: 2 classes
@@ -64,46 +65,48 @@ class BinaryNLITrainer:
 
         # Mixed precision training
         self.use_amp = cfg.device.mixed_precision
+        self.gradient_accumulation_steps = cfg.training.get('gradient_accumulation_steps', 1)
 
     def train_epoch(self, model, dataloader, optimizer, scheduler, criterion):
-        """Train for one epoch."""
+        """Train for one epoch with gradient accumulation support."""
         model.train()
         total_loss = 0
+        optimizer.zero_grad(set_to_none=True)  # Initialize once before loop
 
         progress_bar = tqdm(dataloader, desc='Training')
-        for batch in progress_bar:
+        for batch_idx, batch in enumerate(progress_bar):
             input_ids = batch['input_ids'].to(self.device)
             attention_mask = batch['attention_mask'].to(self.device)
             labels = batch['labels'].to(self.device)
-
-            optimizer.zero_grad()
 
             if self.use_amp:
                 with autocast('cuda', dtype=torch.bfloat16):
                     outputs = model(input_ids, attention_mask)
                     loss = criterion(outputs, labels)
+                    # Scale loss by accumulation steps
+                    loss = loss / self.gradient_accumulation_steps
 
                 loss.backward()
-                torch.nn.utils.clip_grad_norm_(
-                    model.parameters(),
-                    self.cfg.training.max_grad_norm
-                )
-                optimizer.step()
             else:
                 outputs = model(input_ids, attention_mask)
                 loss = criterion(outputs, labels)
+                loss = loss / self.gradient_accumulation_steps
 
                 loss.backward()
+
+            # Only update weights every N accumulation steps
+            if (batch_idx + 1) % self.gradient_accumulation_steps == 0:
                 torch.nn.utils.clip_grad_norm_(
                     model.parameters(),
                     self.cfg.training.max_grad_norm
                 )
                 optimizer.step()
+                scheduler.step()
+                optimizer.zero_grad(set_to_none=True)
 
-            scheduler.step()
-
-            total_loss += loss.item()
-            progress_bar.set_postfix({'loss': f'{loss.item():.4f}'})
+            loss_val = loss.item() * self.gradient_accumulation_steps  # Unscale for logging
+            total_loss += loss_val
+            progress_bar.set_postfix({'loss': f'{loss_val:.4f}'})
 
         return total_loss / len(dataloader)
 
@@ -131,11 +134,16 @@ class BinaryNLITrainer:
             total_loss += loss.item()
 
             preds = torch.argmax(outputs, dim=-1)
-            all_preds.extend(preds.cpu().numpy())
-            all_labels.extend(labels.cpu().numpy())
+            # Accumulate on GPU (more efficient than per-batch CPU transfer)
+            all_preds.append(preds)
+            all_labels.append(labels)
+
+        # Single GPU→CPU transfer after loop (more efficient)
+        all_preds = torch.cat(all_preds).cpu().numpy()
+        all_labels = torch.cat(all_labels).cpu().numpy()
 
         # Compute metrics
-        accuracy = accuracy_score(all_labels, all_preds)
+        accuracy = accuracy_score(all_preds, all_labels)
 
         # Binary classification metrics
         precision, recall, f1, _ = precision_recall_fscore_support(
@@ -166,12 +174,17 @@ class BinaryNLITrainer:
 
     def train(self, model, train_loader, val_loader, class_weights=None):
         """Train and evaluate the model."""
-        # Setup optimizer and scheduler
+        # Setup optimizer and scheduler - use fused AdamW for CUDA acceleration
+        optimizer_fused = self.device == 'cuda' and self.cfg.training.get('optimizer_type') == 'adamw_fused'
         optimizer = torch.optim.AdamW(
             model.parameters(),
             lr=self.cfg.training.learning_rate,
-            weight_decay=self.cfg.training.weight_decay
+            weight_decay=self.cfg.training.weight_decay,
+            fused=optimizer_fused
         )
+        optimizer_type = 'fused AdamW' if optimizer_fused else 'standard AdamW'
+        if self.logger:
+            self.logger.info(f"Using {optimizer_type} optimizer (lr={self.cfg.training.learning_rate}, wd={self.cfg.training.weight_decay})")
 
         total_steps = len(train_loader) * self.cfg.training.num_epochs
         warmup_steps = int(total_steps * self.cfg.training.warmup_ratio)
@@ -358,6 +371,17 @@ def main(cfg: DictConfig):
     logger.info(f"Device: {device}")
     logger.info(f"Run directory: {run_dir}")
 
+    # Enable TF32 for Ampere GPU acceleration (RTX 3090/A100)
+    if device == 'cuda' and cfg.device.get('use_tf32', True):
+        # Check compute capability for Ampere+ (8.0+)
+        compute_cap = torch.cuda.get_device_capability()
+        if compute_cap[0] >= 8:
+            torch.backends.cuda.matmul.allow_tf32 = True
+            torch.backends.cudnn.allow_tf32 = True
+            logger.info(f"TF32 enabled for matmul and cuDNN operations (GPU compute capability {compute_cap})")
+        else:
+            logger.warning(f"TF32 not supported on compute capability {compute_cap} (requires 8.0+)")
+
     cpu_debug_mode = (
         device == 'cpu'
         and cfg.runtime.get('cpu_debug_mode', False)
@@ -445,22 +469,68 @@ def main(cfg: DictConfig):
     train_dist.to_csv(run_dir / 'train_label_distribution.csv', index=False)
     criterion_dist.to_csv(run_dir / 'train_criterion_distribution.csv', index=False)
 
-    # Create data loaders
-    train_loader = DataLoader(
-        train_dataset,
-        batch_size=cfg.training.batch_size,
-        shuffle=True,
-        num_workers=cfg.data.get('num_workers', 0),
-    )
+    # DataLoader optimization settings
+    num_workers = cfg.data.get('num_workers', 8) if device == 'cuda' else 0
+    pin_memory = cfg.data.get('pin_memory', True) if device == 'cuda' else False
+    prefetch_factor = cfg.data.get('prefetch_factor', 4) if num_workers > 0 else None
+    use_length_bucketing = cfg.data.get('use_length_bucketing', False)
+
+    logger.info(f"DataLoader settings: num_workers={num_workers}, pin_memory={pin_memory}, "
+                f"prefetch_factor={prefetch_factor}, length_bucketing={use_length_bucketing}")
+
+    # Create data loaders with optional length bucketing
+    if use_length_bucketing:
+        # Get sequence lengths for bucketing
+        train_lengths = [len(sample['input_ids']) for sample in train_dataset]
+        train_sampler = LengthBucketSampler(
+            train_lengths,
+            batch_size=cfg.training.batch_size,
+            drop_last=False,
+            shuffle=True,
+            num_buckets=cfg.data.get('num_buckets', 10)
+        )
+
+        train_loader = DataLoader(
+            train_dataset,
+            batch_sampler=train_sampler,
+            pin_memory=pin_memory,
+            num_workers=num_workers,
+            persistent_workers=True if num_workers > 0 else False,
+            collate_fn=collate_fn_dynamic_padding
+        )
+    else:
+        train_loader = DataLoader(
+            train_dataset,
+            batch_size=cfg.training.batch_size,
+            shuffle=True,
+            pin_memory=pin_memory,
+            num_workers=num_workers,
+            persistent_workers=True if num_workers > 0 else False,
+            prefetch_factor=prefetch_factor
+        )
+
+    # Val and test loaders (no bucketing, but use dynamic padding if enabled)
+    collate_fn = collate_fn_dynamic_padding if use_length_bucketing else None
+
     val_loader = DataLoader(
         val_dataset,
         batch_size=cfg.training.batch_size,
-        num_workers=cfg.data.get('num_workers', 0),
+        shuffle=False,
+        pin_memory=pin_memory,
+        num_workers=num_workers,
+        persistent_workers=True if num_workers > 0 else False,
+        prefetch_factor=prefetch_factor,
+        collate_fn=collate_fn
     )
     test_loader = DataLoader(
         test_dataset,
         batch_size=cfg.training.batch_size,
-        num_workers=cfg.data.get('num_workers', 0),
+        shuffle=False,
+        pin_memory=pin_memory,
+        num_workers=num_workers,
+        persistent_workers=True if num_workers > 0 else False,
+        prefetch_factor=prefetch_factor,
+        collate_fn=collate_fn
     )
 
     # Initialize model for BINARY classification
@@ -481,7 +551,20 @@ def main(cfg: DictConfig):
         dora_alpha=cfg.model.get('dora_alpha', 32.0),
         dora_dropout=cfg.model.get('dora_dropout', 0.05),
         local_files_only=cfg.runtime.get('force_hf_offline', False),
+        use_flash_attention=cfg.model.get('use_flash_attention', True),
     )
+
+    # Optional: torch.compile optimization (PyTorch 2.0+)
+    if cfg.model.get('use_torch_compile', False):
+        if hasattr(torch, 'compile'):
+            try:
+                logger.info("Compiling model with torch.compile...")
+                model = torch.compile(model, mode='reduce-overhead', backend='inductor')
+                logger.info("Model compilation complete - expect faster training after warmup")
+            except Exception as e:
+                logger.warning(f"torch.compile failed: {e}. Continuing without compilation.")
+        else:
+            logger.warning(f"torch.compile not available (PyTorch {torch.__version__}). Requires PyTorch 2.0+")
 
     # Get class weights
     class_weights = None

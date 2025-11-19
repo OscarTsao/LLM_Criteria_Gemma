@@ -1,0 +1,61 @@
+# @package _global_
+# RTX 3090 ULTRA Performance Configuration
+# All optimizations including experimental features
+# Usage: python src/training/train_nli_binary.py experiment=rtx3090_ultra
+
+model:
+  name: google/gemma-3-1b-it
+  pooling_strategy: mean
+  use_gradient_checkpointing: true
+  use_flash_attention: true
+  use_torch_compile: true  # Experimental: +10-30% if stable
+  dora_rank: 16
+  dora_alpha: 32.0
+  dora_dropout: 0.1
+
+training:
+  num_epochs: 100
+  batch_size: 16  # Maximum batch size (may need reduction if OOM)
+  gradient_accumulation_steps: 1  # Increase if OOM with batch_size=16
+  learning_rate: 2e-5
+  weight_decay: 0.01
+  warmup_ratio: 0.1
+  max_grad_norm: 1.0
+  optimizer_type: adamw_fused
+  use_class_weights: true
+  early_stopping_patience: 20
+  early_stopping_min_delta: 0.0
+
+data:
+  data_dir: ${hydra:runtime.cwd}/data/redsm5
+  max_length: 512
+  test_size: 0.15
+  val_size: 0.15
+  post_limit: null
+  num_workers: 8
+  pin_memory: true
+  prefetch_factor: 4
+  use_length_bucketing: true  # Reduce padding waste
+  num_buckets: 10
+
+device:
+  use_cuda: true
+  mixed_precision: true
+  use_tf32: true
+
+dora:
+  rank: 16
+  alpha: 32.0
+  dropout: 0.1
+
+mlflow:
+  enabled: true
+  experiment_name: "nli_binary_rtx3090_ultra"
+  tracking_uri: sqlite:///mlflow.db
+  log_models: true
+
+output:
+  base_dir: outputs
+  experiment_name: nli_binary_rtx3090_ultra
+  save_best_only: true
+  save_predictions: true

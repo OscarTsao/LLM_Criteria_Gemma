@@ -1,0 +1,80 @@
+# @package _global_
+
+# RTX 3090 24GB Optimized Configuration
+#
+# This configuration enables all performance optimizations for RTX 3090 GPUs:
+# - TF32 acceleration (Ampere architecture)
+# - Flash Attention via SDPA
+# - Fused AdamW optimizer
+# - Optimized DataLoader settings (4 workers, pin_memory, prefetch)
+# - Increased batch size to 8 (from default 4)
+# - Mixed precision (bfloat16)
+# - Gradient checkpointing
+# - DoRA parameter-efficient fine-tuning
+#
+# Usage:
+#   python src/training/train_nli_binary.py experiment=rtx3090_optimized
+#
+# Expected Performance:
+# - ~2x faster training compared to default settings
+# - 12-15GB GPU memory usage (leaves headroom for system)
+# - Supports full 1B model with all optimizations
+
+# Model optimizations
+model:
+  name: google/gemma-3-1b-it
+  pooling_strategy: mean
+  use_gradient_checkpointing: true
+  use_flash_attention: true  # Enable Flash Attention (critical for speed)
+  use_torch_compile: false  # Can enable for additional speedup, but may have compatibility issues
+  use_dora: true
+  dora_rank: 16
+  dora_alpha: 32.0
+  dora_dropout: 0.05
+
+# Training optimizations
+training:
+  batch_size: 8  # Increased from default 4
+  learning_rate: 2e-5
+  num_epochs: 100
+  optimizer_type: adamw_fused  # Fused optimizer for CUDA
+  use_class_weights: true
+  early_stopping_patience: 20
+  weight_decay: 0.01
+  warmup_ratio: 0.1
+  max_grad_norm: 1.0
+
+# Data loading optimizations
+data:
+  max_length: 512
+  test_size: 0.15
+  val_size: 0.15
+  num_workers: 4  # Parallel data loading
+  pin_memory: true  # Faster GPU transfer
+  prefetch_factor: 2  # Prefetch batches
+
+# Device optimizations
+device:
+  use_cuda: true
+  mixed_precision: true  # bfloat16
+  use_tf32: true  # TF32 for Ampere GPUs (critical for speed)
+
+# Output settings
+output:
+  base_dir: outputs
+  experiment_name: nli_binary_rtx3090_optimized
+  save_best_only: true
+  save_predictions: true
+
+# MLflow tracking
+mlflow:
+  enabled: true
+  experiment_name: nli_binary_rtx3090_optimized
+  tracking_uri: sqlite:///mlflow.db
+  artifact_location: mlruns
+  log_models: true
+  tags:
+    model: ${model.name}
+    task: binary_nli
+    gpu: rtx3090
+    optimizations: tf32_flash_fused_adamw

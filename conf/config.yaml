@@ -13,17 +13,22 @@ model:
   hidden_dropout_prob: 0.1
   classifier_hidden_size: null  # null = simple linear, or specify size like 768
   use_gradient_checkpointing: true  # Enable to reduce memory usage (trades compute for memory)
+  use_flash_attention: true  # Enable Flash Attention via SDPA for faster attention computation
+  use_torch_compile: true  # Enable torch.compile (PyTorch 2.0+) for additional speedup (+10-30%)
 
 # Training configuration
 training:
   num_epochs: 100
-  batch_size: 4  # Safe default for Gemma-3-1B-IT on 24GB GPUs with DoRA
+  batch_size: 12  # Maximum safe batch size for RTX 3090 24GB with all optimizations
+  gradient_accumulation_steps: 1  # Effective batch = batch_size * accumulation_steps
   learning_rate: 2e-5
   weight_decay: 0.01
   warmup_ratio: 0.1
   max_grad_norm: 1.0
   use_class_weights: true
   early_stopping_patience: 20  # Stop if macro-F1 does not improve for 20 epochs
+  optimizer_type: adamw_fused  # Options: adamw_fused (CUDA only), adamw (standard)
+  early_stopping_min_delta: 0.0  # Minimum improvement delta for early stopping
 
 # Data configuration
 data:
@@ -34,6 +39,11 @@ data:
   test_size: 0.15  # 15% of data for final test set
   val_size: 0.15   # 15% of remaining data for validation
   post_limit: null  # Limit number of posts (None = use all)
+  num_workers: 8  # Maximum workers for async data loading (prevents CPU bottleneck)
+  pin_memory: true  # Pin memory for faster GPU transfer (CUDA only)
+  prefetch_factor: 4  # Number of batches to prefetch per worker (increased for more workers)
+  use_length_bucketing: false  # Enable length bucketing for efficiency (reduces padding waste)
+  num_buckets: 10  # Number of length buckets for bucketing sampler
 
 # Cross-validation configuration
 cv:
@@ -58,6 +68,7 @@ logging:
 device:
   use_cuda: true
   mixed_precision: true  # Use bfloat16 (no GradScaler needed)
+  use_tf32: true  # Enable TF32 for Ampere GPUs (RTX 3090/A100) - significant speedup
 
 # Runtime fallbacks for constrained environments (e.g., CPU-only)
 runtime:
